@@ -1,0 +1,45 @@
+{
+  "plan_responses": {
+    "sales_analysis": {
+      "task": "sales_analysis",
+      "tables": ["orders", "order_items", "products"],
+      "metrics": ["revenue", "order_count", "average_order_value"],
+      "dimensions": ["product_category", "time_period"],
+      "filters": ["status = 'Complete'", "created_at >= '2024-01-01'"],
+      "time_range": "last_30_days"
+    },
+    "customer_analysis": {
+      "task": "customer_analysis", 
+      "tables": ["users", "orders"],
+      "metrics": ["customer_count", "retention_rate", "lifetime_value"],
+      "dimensions": ["age_group", "gender", "state"],
+      "filters": ["users.created_at >= '2023-01-01'"],
+      "time_range": "last_year"
+    },
+    "product_performance": {
+      "task": "product_performance",
+      "tables": ["products", "order_items"],
+      "metrics": ["units_sold", "revenue", "profit_margin"],
+      "dimensions": ["category", "brand", "department"],
+      "filters": ["order_items.status = 'Complete'"],
+      "time_range": "last_quarter"
+    }
+  },
+  "sql_responses": {
+    "sales_analysis": "SELECT p.category, COUNT(DISTINCT o.order_id) as order_count, SUM(oi.sale_price) as revenue, AVG(oi.sale_price) as avg_order_value FROM orders o JOIN order_items oi ON o.order_id = oi.order_id JOIN products p ON oi.product_id = p.id WHERE o.status = 'Complete' AND o.created_at >= '2024-01-01' GROUP BY p.category ORDER BY revenue DESC LIMIT 1000",
+    "customer_analysis": "SELECT CASE WHEN u.age < 25 THEN 'Young' WHEN u.age BETWEEN 25 AND 45 THEN 'Adult' ELSE 'Senior' END as age_group, u.gender, COUNT(DISTINCT u.id) as customer_count, COUNT(DISTINCT o.order_id) as total_orders FROM users u LEFT JOIN orders o ON u.id = o.user_id WHERE u.created_at >= '2023-01-01' GROUP BY age_group, u.gender ORDER BY customer_count DESC LIMIT 1000",
+    "product_performance": "SELECT p.name, p.category, p.brand, COUNT(oi.id) as units_sold, SUM(oi.sale_price) as revenue, SUM(oi.sale_price - p.cost) as profit FROM products p JOIN order_items oi ON p.id = oi.product_id WHERE oi.status = 'Complete' GROUP BY p.id, p.name, p.category, p.brand, p.cost ORDER BY revenue DESC LIMIT 1000"
+  },
+  "report_responses": {
+    "sales_analysis": "Sales Analysis Insights:\n\nKey Findings:\n- Total Revenue: $482,450 across 1,250 completed orders\n- Average Order Value: $385.96\n- Top Category: Electronics (35% of revenue)\n- Growth Rate: 12% increase vs. previous period\n\nPerformance Metrics:\n- Order Completion Rate: 85%\n- Revenue per Category varies significantly\n- Peak sales occur on weekends\n\nRecommendations:\n1. Focus marketing efforts on Electronics category\n2. Investigate causes of 15% order incompletion\n\nNext Questions:\n1. What drives Electronics category success?\n2. How can we improve order completion rates?",
+    "customer_analysis": "Customer Analysis Report:\n\nDemographic Insights:\n- Total Active Customers: 15,420\n- Age Distribution: 45% Adult (25-45), 35% Young (<25), 20% Senior (45+)\n- Gender Split: 52% Female, 48% Male\n- Geographic Concentration: 60% from top 10 states\n\nBehavioral Patterns:\n- Average Customer Lifetime: 18 months\n- Retention Rate: 68% after first purchase\n- Repeat Purchase Rate: 45%\n\nSegment Performance:\n- Adult segment: Highest lifetime value ($1,250)\n- Young segment: Highest frequency (3.2 orders/year)\n- Senior segment: Highest average order value ($420)\n\nNext Questions:\n1. What drives retention differences between segments?\n2. How can we increase repeat purchase rates?",
+    "product_performance": "Product Performance Analysis:\n\nTop Performers:\n- Product A: 2,500 units, $125,000 revenue\n- Product B: 1,800 units, $98,500 revenue  \n- Product C: 1,200 units, $85,200 revenue\n\nCategory Insights:\n- Electronics: 40% of total units, 45% of revenue\n- Clothing: 35% of units, 30% of revenue\n- Home & Garden: 25% of units, 25% of revenue\n\nProfitability Analysis:\n- Average Margin: 35%\n- Electronics: 42% margin (highest)\n- Clothing: 28% margin (lowest)\n\nTrends:\n- Q4 shows 25% sales increase\n- Mobile accessories growing 40% YoY\n\nNext Questions:\n1. Why do Electronics have higher margins?\n2. How can we improve Clothing profitability?"
+  },
+  "error_responses": {
+    "invalid_sql": "SQL parse error: Expected SELECT statement",
+    "disallowed_table": "Disallowed tables: {'external_table'}",
+    "bigquery_quota": "BigQuery error: Quota exceeded. Please try again later.",
+    "gemini_rate_limit": "Gemini API rate limit exceeded",
+    "authentication_error": "Authentication failed: Invalid API key"
+  }
+}
