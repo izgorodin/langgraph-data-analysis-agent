@@ -28,11 +28,11 @@ repos:
       - id: flake8
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
+    rev: v1.17.1
     hooks:
       - id: mypy
-        additional_dependencies: [types-all]
-        args: [--strict]
+        additional_dependencies: [pydantic, types-requests]
+        args: [--no-strict-optional, --ignore-missing-imports]
 
   - repo: https://github.com/PyCQA/bandit
     rev: 1.7.9

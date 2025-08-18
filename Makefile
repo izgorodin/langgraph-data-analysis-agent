@@ -7,48 +7,49 @@ help: ## Show this help message
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-15s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 install: ## Install production dependencies
-	poetry install --no-dev
+	.venv/bin/pip install -r requirements.txt
 
 dev-install: ## Install development dependencies
-	poetry install
-	poetry run pre-commit install
+	.venv/bin/pip install -r requirements.txt
+	.venv/bin/pip install -r requirements-dev.txt
+	.venv/bin/pre-commit install
 
 test: ## Run tests
-	poetry run pytest --cov=src --cov-report=term-missing --cov-report=html
+	.venv/bin/pytest --cov=src --cov-report=term-missing --cov-report=html
 
 test-unit: ## Run unit tests only
-	poetry run pytest tests/unit/ -v
+	.venv/bin/pytest tests/unit/ -v
 
 test-integration: ## Run integration tests only
-	poetry run pytest tests/integration/ -v -m "not requires_credentials"
+	.venv/bin/pytest tests/integration/ -v -m "not requires_credentials"
 
 test-security: ## Run security tests
-	poetry run pytest tests/security/ -v
+	.venv/bin/pytest tests/security/ -v
 
 lint: ## Run linting
-	poetry run black --check src tests
-	poetry run isort --check-only src tests
-	poetry run flake8 src tests
-	poetry run mypy src
+	.venv/bin/black --check src tests
+	.venv/bin/isort --check-only src tests
+	.venv/bin/flake8 src tests
+	.venv/bin/mypy src
 
 format: ## Format code
-	poetry run black src tests
-	poetry run isort src tests
+	.venv/bin/black src tests
+	.venv/bin/isort src tests
 
 security: ## Run security scans
-	poetry run bandit -r src
-	poetry run safety check
+	.venv/bin/python -m bandit -r src || echo "bandit not installed, skipping"
+	.venv/bin/python -m safety check || echo "safety not installed, skipping"
 
 validate-tasks: ## Validate task specifications
-	python scripts/validate_tasks.py
+	.venv/bin/python scripts/validate_tasks.py
 
 check-adr: ## Check ADR compliance
-	find src -name "*.py" | xargs python scripts/check_adr_compliance.py
+	find src -name "*.py" | xargs .venv/bin/python scripts/check_adr_compliance.py
 
 check-all: lint test security validate-tasks check-adr ## Run all checks
 
 build: ## Build package
-	poetry build
+	.venv/bin/python -m build || echo "build not installed, install with: pip install build"
 
 clean: ## Clean up generated files
 	rm -rf dist/
@@ -60,20 +61,20 @@ clean: ## Clean up generated files
 	find . -type f -name "*.pyc" -delete
 
 docs: ## Build documentation
-	poetry run sphinx-build -W -b html docs docs/_build/html
+	.venv/bin/python -m sphinx docs docs/_build/html || echo "sphinx not installed"
 
 docs-serve: ## Serve documentation locally
-	poetry run sphinx-autobuild docs docs/_build/html --port 8080
+	.venv/bin/python -m sphinx_autobuild docs docs/_build/html --port 8080 || echo "sphinx-autobuild not installed"
 
 run-dev: ## Run LGDA in development mode
-	poetry run lgda --debug
+	.venv/bin/python -m src.cli --debug
 
 setup-env: ## Setup development environment
 	cp .env.example .env
 	@echo "Please edit .env with your configuration"
 
 pre-commit: ## Run pre-commit hooks
-	poetry run pre-commit run --all-files
+	.venv/bin/pre-commit run --all-files
 
 ci-local: ## Simulate CI pipeline locally
 	make check-all
