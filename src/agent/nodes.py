@@ -1,15 +1,18 @@
 from __future__ import annotations
+
 import json
-from typing import Dict, Any
+from typing import Any, Dict
+
 import pandas as pd
 import sqlglot
-from sqlglot import exp
 from jinja2 import Template
-from .state import AgentState
-from ..config import settings
+from sqlglot import exp
+
 from ..bq import get_schema, run_query
+from ..config import settings
 from ..llm import llm_completion
-from .prompts import PLAN_SYSTEM, SQL_SYSTEM, REPORT_SYSTEM
+from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
+from .state import AgentState
 
 ALLOWED = set(settings.allowed_tables)
 
@@ -43,6 +46,7 @@ def _schema_map() -> Dict[str, list[str]]:
 
 # Node: plan
 
+
 def plan_node(state: AgentState) -> AgentState:
     schema = _schema_map()
     prompt = PLAN_TEMPLATE.render(question=state.question, schema=schema)
@@ -53,21 +57,29 @@ def plan_node(state: AgentState) -> AgentState:
         # attempt to extract JSON
         start = raw.find("{")
         end = raw.rfind("}")
-        plan = json.loads(raw[start:end+1]) if start!=-1 and end!=-1 else {"task":"ad-hoc","tables":list(ALLOWED)}
+        plan = (
+            json.loads(raw[start : end + 1])
+            if start != -1 and end != -1
+            else {"task": "ad-hoc", "tables": list(ALLOWED)}
+        )
     state.plan_json = plan
     return state
 
 
 # Node: synthesize_sql
 
+
 def synthesize_sql_node(state: AgentState) -> AgentState:
-    prompt = SQL_TEMPLATE.render(plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED))
+    prompt = SQL_TEMPLATE.render(
+        plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
+    )
     sql = llm_completion(prompt, system=SQL_SYSTEM)
     state.sql = sql.strip().strip("`")
     return state
 
 
 # Node: validate_sql
+
 
 def validate_sql_node(state: AgentState) -> AgentState:
     try:
@@ -99,6 +111,7 @@ def validate_sql_node(state: AgentState) -> AgentState:
 
 # Node: execute_sql
 
+
 def execute_sql_node(state: AgentState) -> AgentState:
     try:
         df = run_query(state.sql)
@@ -118,6 +131,7 @@ def execute_sql_node(state: AgentState) -> AgentState:
 
 # Node: analyze_df
 
+
 def analyze_df_node(state: AgentState) -> AgentState:
     # light deterministic notes; LLM will write final report
     notes = []
@@ -130,6 +144,7 @@ def analyze_df_node(state: AgentState) -> AgentState:
 
 
 # Node: report
+
 
 def report_node(state: AgentState) -> AgentState:
     plan = json.dumps(state.plan_json, ensure_ascii=False)
