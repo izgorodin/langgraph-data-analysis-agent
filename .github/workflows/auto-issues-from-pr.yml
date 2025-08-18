@@ -1,0 +1,303 @@
+name: Auto Task Issues
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+  push:
+    branches:
+      - main
+    paths:
+      - tasks/**
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: auto-issues-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  upsert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Upsert Task Issues (create/update)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const {owner, repo} = context.repo;
+            const isPR = context.eventName === 'pull_request';
+
+            // Collect candidate files and IDs
+            let changedFiles = [];
+            let prNumber = undefined;
+            let initialIds = [];
+            if (isPR) {
+              prNumber = context.payload.pull_request.number;
+              const body = context.payload.pull_request.body || '';
+              const title = context.payload.pull_request.title || '';
+              const idsFromText = new Set((title + '\n' + body).match(/LGDA-\d{3}/g) || []);
+              const fileResp = await github.rest.pulls.listFiles({ owner, repo, pull_number: prNumber, per_page: 100 });
+              for (const f of fileResp.data || []) {
+                if (f.filename) changedFiles.push(f.filename);
+                const idsInName = (f.filename || '').match(/LGDA-\d{3}/g) || [];
+                for (const id of idsInName) idsFromText.add(id);
+              }
+              // If we found IDs in text but not files, still proceed by mapping IDs to task files below
+              initialIds = Array.from(idsFromText);
+            } else {
+              // push event: prefer payload.commits lists, fallback to git diff HEAD~1
+              const commits = context.payload.commits || [];
+              for (const c of commits) {
+                for (const f of [...(c.added||[]), ...(c.modified||[]), ...(c.removed||[])]) {
+                  if (f) changedFiles.push(f);
+                }
+              }
+              if (changedFiles.length === 0) {
+                const execSync = require('child_process').execSync;
+                try {
+                  // Try to get a deeper checkout first
+                  execSync('git fetch --deepen=2', { encoding: 'utf8' });
+                  const out = execSync('git diff --name-only HEAD~1 HEAD', { encoding: 'utf8' });
+                  changedFiles = out.split(/\r?\n/).filter(Boolean);
+                } catch (e) {
+                  core.warning(`git diff failed: ${e.message}`);
+                  // Fallback: assume all task files might be relevant
+                  core.info('Fallback: processing all task files');
+                }
+              }
+              initialIds = [];
+            }
+
+            // Build map ID -> task file by scanning tasks/**
+            function listTaskMd(dir) {
+              let out = [];
+              if (!fs.existsSync(dir)) return out;
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                const p = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                  out = out.concat(listTaskMd(p));
+                } else if (entry.isFile() && p.toLowerCase().endsWith('.md')) {
+                  out.push(p);
+                }
+              }
+              return out;
+            }
+            const taskFiles = listTaskMd('tasks');
+
+            // Parse top metadata block
+            function parseMetadata(text) {
+              const meta = { name: null, id: null, version: null, lastUpdated: null, status: null };
+              const lines = text.split(/\r?\n/);
+              if (lines[0]?.trim() !== '---') return meta;
+              let i = 1;
+              for (; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.trim() === '---') { i++; break; }
+                const m = line.match(/^\s*\*\*(.+?)\*\*:\s*(.+)\s*$/);
+                if (m) {
+                  const key = m[1].trim().toLowerCase();
+                  const val = m[2].trim();
+                  if (key === 'name') meta.name = val;
+                  else if (key === 'id') meta.id = val;
+                  else if (key === 'version') meta.version = val;
+                  else if (key === 'last updated') meta.lastUpdated = val;
+                  else if (key === 'status') meta.status = val;
+                }
+              }
+              return meta;
+            }
+
+            // Build map ID -> info
+            const idToInfo = new Map();
+            for (const file of taskFiles) {
+              try {
+                const text = fs.readFileSync(file, 'utf8');
+                const meta = parseMetadata(text);
+                const id = meta.id || (text.match(/LGDA-\d{3}/) || [null])[0];
+                if (!id) continue;
+                if (!idToInfo.has(id)) idToInfo.set(id, { file, meta, content: text });
+              } catch (e) {
+                core.warning(`Failed to read ${file}: ${e.message}`);
+              }
+            }
+
+            // Derive IDs from changed task files
+            const idsFromChanged = new Set(initialIds);
+            for (const f of changedFiles) {
+              if (!f || !f.startsWith('tasks/') || !f.toLowerCase().endsWith('.md')) continue;
+              try {
+                const text = fs.readFileSync(f, 'utf8');
+                const meta = parseMetadata(text);
+                const id = meta.id || (text.match(/LGDA-\d{3}/) || [null])[0];
+                if (id) idsFromChanged.add(id);
+              } catch {}
+            }
+            const ids = Array.from(idsFromChanged);
+
+            // For push events, also include ALL SWK IDs found in task files
+            if (!isPR) {
+              const allTaskIds = Array.from(idToInfo.keys());
+              core.info(`All task IDs found: ${allTaskIds.join(', ')}`);
+              for (const id of allTaskIds) {
+                if (!idsFromChanged.has(id)) idsFromChanged.add(id);
+              }
+              ids.splice(0, ids.length, ...Array.from(idsFromChanged));
+            }
+
+            // Debug logs for visibility
+            core.info(`Final IDs to process: ${ids.join(', ')}`);
+            const mapPreview = Array.from(idToInfo.entries()).map(([k, v]) => `${k}→${v.file}`).join(', ');
+            core.info(`Task files map: ${mapPreview}`);
+            if (ids.length === 0 && !isPR) {
+              core.info('No LGDA IDs found; nothing to do.');
+              return;
+            }
+
+            // Ensure labels exist
+            async function ensureLabels(labels) {
+              for (const lbl of labels) {
+                try {
+                  await github.rest.issues.getLabel({ owner, repo, name: lbl.name || lbl });
+                } catch (e) {
+                  if (e.status === 404 && typeof lbl !== 'string') {
+                    try { await github.rest.issues.createLabel({ owner, repo, ...lbl }); } catch {}
+                  }
+                }
+              }
+            }
+            await ensureLabels([
+              { name: 'lgda-task', color: '0e8a16', description: 'LangGraph Data Analysis Agent task' },
+              { name: 'auto', color: '0366d6', description: 'Created by automation' },
+              { name: 'infrastructure', color: 'f9d71c', description: 'Infrastructure and tooling' },
+              { name: 'bigquery', color: '4285f4', description: 'BigQuery integration' },
+              { name: 'llm', color: 'ff6d00', description: 'LLM integration' },
+              { name: 'langgraph', color: '00c851', description: 'LangGraph workflow' },
+            ]);
+
+            // Semantic version compare: returns -1,0,1
+            function cmpVersions(a, b) {
+              const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
+              const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
+              const len = Math.max(pa.length, pb.length);
+              for (let i = 0; i < len; i++) {
+                const da = pa[i] || 0; const db = pb[i] || 0;
+                if (da > db) return 1;
+                if (da < db) return -1;
+              }
+              return 0;
+            }
+
+            const created = [];
+            const updated = [];
+            function normStatus(s) {
+              if (!s) return '';
+              return s.toLowerCase().replace(/\s+/g, ' ').trim();
+            }
+            function isImplementedOrDone(s) {
+              const n = normStatus(s);
+              return n.startsWith('implemented') || n.startsWith('done');
+            }
+            for (const id of ids) {
+              const info = idToInfo.get(id);
+              if (!info) { core.info(`Skip ${id}: no matching task file in tasks/**`); continue; }
+              const { file, meta, content } = info;
+              const title = meta.name && /^LGDA-\d{3}/.test(meta.name) ? meta.name : `${id}: Task`;
+              const localVersion = meta.version || '1.0';
+              const localStatus = meta.status || '';
+              const body = content; // Use content as-is, metadata is source of truth
+
+              // Ensure per-ID label exists (used for precise matching & dedupe)
+              const idLabel = `lgda:${id}`;
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: idLabel });
+              } catch (e) {
+                if (e.status === 404) {
+                  try { await github.rest.issues.createLabel({ owner, repo, name: idLabel, color: 'd73a4a', description: `${id} tracker` }); } catch {}
+                }
+              }
+
+              // Find existing issues by label first (state=all), then by exact title
+              const byLabel = await github.rest.issues.listForRepo({ owner, repo, state: 'all', labels: idLabel, per_page: 100 });
+              let candidates = (byLabel.data || []).filter(i => !i.pull_request);
+
+              // Fallback (non-deprecated): list all issues and filter by title prefix (state:all)
+              if (candidates.length === 0) {
+                const allIssues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', per_page: 100 });
+                candidates = (allIssues || []).filter(i => !i.pull_request && i.title && i.title.startsWith(`${id}`));
+              }
+
+              // Separate open vs closed
+              const openOnes = candidates.filter(i => i.state === 'open');
+              const closedOnes = candidates.filter(i => i.state !== 'open');
+
+              // Choose primary issue: prefer first open, else most recently updated closed
+              let primary = openOnes[0] || closedOnes.sort((a,b) => new Date(b.updated_at) - new Date(a.updated_at))[0];
+
+              // If multiple open duplicates exist, close extras
+              if (openOnes.length > 1) {
+                for (const dup of openOnes.slice(1)) {
+                  try {
+                    await github.rest.issues.createComment({ owner, repo, issue_number: dup.number, body: `Closing duplicate of ${id}. Managed by automation.` });
+                    await github.rest.issues.update({ owner, repo, issue_number: dup.number, state: 'closed' });
+                  } catch {}
+                }
+              }
+
+              // If no primary issue, create new unless task is already Implemented/Done
+              if (!primary) {
+                if (isImplementedOrDone(localStatus)) {
+                  core.info(`Skip creating ${id}: status ${localStatus} (Implemented/Done)`);
+                } else {
+                  try {
+                    const res = await github.rest.issues.create({ owner, repo, title, body, labels: ['lgda-task','auto', idLabel] });
+                    created.push(res.data.number);
+                    core.info(`Created ${id} -> #${res.data.number}`);
+                  } catch (e) {
+                    core.warning(`Create failed for ${id}: ${e.message}`);
+                  }
+                }
+                continue;
+              }
+
+              // Ensure labels present on primary
+              try {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: primary.number, labels: ['lgda-task','auto', idLabel] });
+              } catch {}
+
+              // Compare local vs remote metadata for version or status change
+              const remoteMeta = parseMetadata(primary.body || '');
+              const remoteVersion = remoteMeta.version || '0';
+              const remoteStatus = remoteMeta.status || '';
+              const cmp = cmpVersions(localVersion, remoteVersion);
+              const statusChanged = normStatus(localStatus) !== normStatus(remoteStatus);
+
+              if (cmp > 0 || statusChanged) {
+                try {
+                  // Update title/body without reopening closed issues by default
+                  await github.rest.issues.update({ owner, repo, issue_number: primary.number, title, body });
+                  updated.push(primary.number);
+                  core.info(`Upsert ${id} -> #${primary.number} (remote v${remoteVersion} '${remoteStatus}' -> local v${localVersion} '${localStatus}')`);
+                } catch (e) {
+                  core.warning(`Update failed #${primary.number} (${id}): ${e.message}`);
+                }
+              } else {
+                core.info(`Skip ${id}: no version/status change (remote v${remoteVersion} '${remoteStatus}', local v${localVersion} '${localStatus}')`);
+              }
+            }
+
+            core.summary.addHeading('Auto Task Issues — Upsert')
+              .addRaw(`Created: ${created.length}, Updated: ${updated.length}`)
+              .addHeading('Created')
+              .addList(created.map(n => `#${n}`))
+              .addHeading('Updated')
+              .addList(updated.map(n => `#${n}`));
+            await core.summary.write();

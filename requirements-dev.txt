@@ -1,0 +1,15 @@
+# Development dependencies
+pytest>=8.0
+pytest-cov>=6.0
+pytest-asyncio>=0.24
+pytest-mock>=3.14
+black>=24.0
+isort>=5.13
+flake8>=7.0
+mypy>=1.8
+pre-commit>=4.0
+coverage>=7.6
+httpx>=0.25  # for testing async HTTP calls
+responses>=0.25  # for mocking HTTP requests
+freezegun>=1.5  # for testing time-dependent code
+factory-boy>=3.3  # for test data factories
