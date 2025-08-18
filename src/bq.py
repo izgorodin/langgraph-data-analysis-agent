@@ -1,7 +1,10 @@
 from __future__ import annotations
-from typing import Optional, List, Dict
-from google.cloud import bigquery
+
+from typing import Dict, List, Optional
+
 from google.api_core.exceptions import BadRequest
+from google.cloud import bigquery
+
 from .config import settings
 
 _bq_client: Optional[bigquery.Client] = None
@@ -10,7 +13,9 @@ _bq_client: Optional[bigquery.Client] = None
 def bq_client() -> bigquery.Client:
     global _bq_client
     if _bq_client is None:
-        _bq_client = bigquery.Client(project=settings.bq_project, location=settings.bq_location)
+        _bq_client = bigquery.Client(
+            project=settings.bq_project, location=settings.bq_location
+        )
     return _bq_client
 
 
