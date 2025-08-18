@@ -1,14 +1,16 @@
 from __future__ import annotations
-from langgraph.graph import StateGraph, END
-from .state import AgentState
+
+from langgraph.graph import END, StateGraph
+
 from .nodes import (
+    analyze_df_node,
+    execute_sql_node,
     plan_node,
+    report_node,
     synthesize_sql_node,
     validate_sql_node,
-    execute_sql_node,
-    analyze_df_node,
-    report_node,
 )
+from .state import AgentState
 
 
 def build_graph():
@@ -28,7 +30,9 @@ def build_graph():
     def on_valid(state: AgentState):
         return "execute_sql" if state.error is None else END
 
-    graph.add_conditional_edges("validate_sql", on_valid, {"execute_sql": "execute_sql", END: END})
+    graph.add_conditional_edges(
+        "validate_sql", on_valid, {"execute_sql": "execute_sql", END: END}
+    )
     graph.add_edge("execute_sql", "analyze_df")
     graph.add_edge("analyze_df", "report")
     graph.add_edge("report", END)
