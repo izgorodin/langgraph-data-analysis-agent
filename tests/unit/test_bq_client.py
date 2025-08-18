@@ -19,7 +19,20 @@ class TestBigQueryClient:
         test_env = {"BIGQUERY_PROJECT": "test-project", "BIGQUERY_LOCATION": "US"}
 
         with patch.dict(os.environ, test_env, clear=True):
+            # Reset global state first
+            import src.bq
+
+            src.bq._bq_client = None
+
             with patch("src.bq.bigquery.Client") as mock_client_class:
+                # Need to reload both config and bq modules to pick up new environment
+                from importlib import reload
+
+                import src.config
+
+                reload(src.config)
+                reload(src.bq)  # This will re-import settings with new values
+
                 from src.bq import bq_client
 
                 client = bq_client()
@@ -119,6 +132,9 @@ class TestBigQueryClient:
         # Mock client to raise BadRequest
         mock_job = Mock()
         mock_job.result.side_effect = BadRequest("Invalid SQL syntax")
+
+        # Clear the default side_effect and set return_value
+        mock_bigquery_client.query.side_effect = None
         mock_bigquery_client.query.return_value = mock_job
 
         with pytest.raises(ValueError) as exc_info:
@@ -176,6 +192,9 @@ class TestBigQueryClient:
 
         mock_job = Mock()
         mock_job.result.return_value.to_dataframe.return_value = large_df
+
+        # Clear the default side_effect and set return_value
+        mock_bigquery_client.query.side_effect = None
         mock_bigquery_client.query.return_value = mock_job
 
         result = run_query(sql)
@@ -187,13 +206,19 @@ class TestBigQueryClient:
         """Test that BigQuery Storage is used for large result sets."""
         sql = "SELECT * FROM orders"
 
-        with patch("src.bq.bigquery.QueryJobConfig"):
-            run_query(sql)
+        # Set up proper mock chain
+        mock_job = Mock()
+        mock_result = Mock()
+        mock_job.result.return_value = mock_result
 
-            # Verify to_dataframe is called with create_bqstorage_client=True
-            mock_bigquery_client.query.return_value.result.return_value.to_dataframe.assert_called_once_with(
-                create_bqstorage_client=True
-            )
+        # Clear the default side_effect and set return_value
+        mock_bigquery_client.query.side_effect = None
+        mock_bigquery_client.query.return_value = mock_job
+
+        run_query(sql)
+
+        # Verify to_dataframe is called with create_bqstorage_client=True
+        mock_result.to_dataframe.assert_called_once_with(create_bqstorage_client=True)
 
     def test_concurrent_query_execution(self, mock_bigquery_client):
         """Test that multiple queries can be executed concurrently."""
@@ -231,10 +256,11 @@ class TestBigQueryClient:
         sql = "SELECT * FROM very_large_table"
 
         # Mock timeout scenario
-        import time
-
         mock_job = Mock()
         mock_job.result.side_effect = Exception("Query timeout")
+
+        # Clear the default side_effect and set return_value
+        mock_bigquery_client.query.side_effect = None
         mock_bigquery_client.query.return_value = mock_job
 
         with pytest.raises(Exception) as exc_info:
@@ -286,6 +312,9 @@ class TestBigQueryClient:
         original_error = BadRequest("Syntax error at line 1")
         mock_job = Mock()
         mock_job.result.side_effect = original_error
+
+        # Clear the default side_effect and set return_value
+        mock_bigquery_client.query.side_effect = None
         mock_bigquery_client.query.return_value = mock_job
 
         with pytest.raises(ValueError) as exc_info:

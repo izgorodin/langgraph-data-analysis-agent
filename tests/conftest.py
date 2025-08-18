@@ -174,14 +174,17 @@ def mock_bigquery_client(sample_schema_response, sample_query_result):
             sample_query_result
         )
 
-        # Setup query method to return appropriate job based on SQL content
-        def mock_query(sql, job_config=None):
+        # Setup query method as a Mock (not a function) for flexibility
+        mock_client.query = Mock()
+
+        # Default behavior: return appropriate job based on SQL content
+        def default_query_side_effect(sql, job_config=None):
             if "INFORMATION_SCHEMA" in sql:
                 return mock_schema_job
             else:
                 return mock_data_job
 
-        mock_client.query = mock_query
+        mock_client.query.side_effect = default_query_side_effect
 
         yield mock_client
 
