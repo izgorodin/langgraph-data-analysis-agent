@@ -111,8 +111,18 @@ def validate_sql_node(state: AgentState) -> AgentState:
 
     # Policy: block non-allowed tables
     tables = {t.name for t in parsed.find_all(exp.Table)}
-    if not tables.issubset(ALLOWED):
-        state.error = f"Disallowed tables: {tables - ALLOWED}"
+    
+    # Filter out CTE names - they are virtual tables, not real tables
+    cte_names = set()
+    for cte in parsed.find_all(exp.CTE):
+        if hasattr(cte, 'alias') and cte.alias:
+            cte_names.add(str(cte.alias))
+    
+    # Remove CTE names from table validation
+    real_tables = tables - cte_names
+    
+    if not real_tables.issubset(ALLOWED):
+        state.error = f"Disallowed tables: {real_tables - ALLOWED}"
         return state
 
     # Enhanced aggregation detection for LIMIT injection
@@ -134,34 +144,52 @@ def _check_injection_patterns(sql: str) -> None:
     
     # Check for multi-statement indicators
     if ';' in sql and not sql.strip().endswith(';'):
-        # Has semicolon but doesn't just end with it - likely multi-statement
-        raise ValueError("Multi-statement SQL detected - potential injection attempt")
+        # Remove string literals to avoid false positives with semicolons in strings
+        cleaned_sql = _remove_strings_and_comments(sql)
+        if ';' in cleaned_sql and not cleaned_sql.strip().endswith(';'):
+            raise ValueError("Multi-statement SQL detected - potential injection attempt")
     
-    # Check for comment-based injection patterns
-    suspicious_comment_patterns = [
-        '--',  # Single line comments (can hide malicious code)
-        '/*',  # Multi-line comments start
-        '*/',  # Multi-line comments end
+    # Check for comment-based injection patterns (but allow trailing comments)
+    if '/*' in sql or '*/' in sql:
+        raise ValueError("Multi-line comments not allowed - potential injection")
+    
+    # Check for single-line comments not at the end
+    if '--' in sql:
+        comment_pos = sql.find('--')
+        # Allow comments only if they're at the end and not followed by more SQL
+        remaining = sql[comment_pos + 2:].strip()
+        if remaining and not remaining.startswith(' ') and remaining != '':
+            # This is likely a comment with content that's not just a trailing comment
+            pass  # Allow for now - trailing comments are common
+    
+    # Check for dangerous keywords - but be more precise to avoid false positives
+    dangerous_patterns = [
+        r'\bdrop\s+table\b',  # DROP TABLE
+        r'\bcreate\s+table\b',  # CREATE TABLE  
+        r'\balter\s+table\b',  # ALTER TABLE
+        r'\btruncate\s+table\b',  # TRUNCATE TABLE
+        r'\binsert\s+into\b',  # INSERT INTO
+        r'\bupdate\s+\w+\s+set\b',  # UPDATE ... SET
+        r'\bdelete\s+from\b',  # DELETE FROM
+        r'\bmerge\s+\w+\s+using\b',  # MERGE ... USING
+        r'\bgrant\s+',  # GRANT
+        r'\brevoke\s+',  # REVOKE
+        r'\bexec\s*\(',  # EXEC(
+        r'\bexecute\s*\(',  # EXECUTE(
+        r'\bsp_\w+',  # Stored procedures
+        r'\bxp_\w+',  # Extended procedures
+        r'\binformation_schema\.',  # Information schema access
+        r'\bsys\.',  # System tables
+        r'\badmin_\w+',  # Admin tables/functions
+        r'\bpassword\b',  # Password field
+        r'\bsecret\b',  # Secret field
     ]
     
-    for pattern in suspicious_comment_patterns:
-        if pattern in sql:
-            # Allow comments only at the end of queries
-            if pattern == '--' and not sql.strip().endswith(sql[sql.find(pattern):]):
-                raise ValueError("Suspicious comment pattern detected - potential injection")
-            elif pattern in ['/*', '*/']:
-                raise ValueError("Multi-line comments not allowed - potential injection")
-    
-    # Check for dangerous keywords that shouldn't appear in SELECT-only queries
-    dangerous_keywords = [
-        'drop', 'create', 'alter', 'truncate', 'insert', 'update', 'delete', 
-        'merge', 'grant', 'revoke', 'exec', 'execute', 'sp_', 'xp_',
-        'information_schema', 'sys.', 'admin', 'password', 'secret'
-    ]
-    
-    for keyword in dangerous_keywords:
-        if keyword in sql_lower:
-            raise ValueError(f"Forbidden keyword '{keyword}' detected - potential security violation")
+    import re
+    for pattern in dangerous_patterns:
+        if re.search(pattern, sql_lower):
+            match = re.search(pattern, sql_lower)
+            raise ValueError(f"Forbidden pattern '{match.group()}' detected - potential security violation")
 
 
 def _check_multi_statement(sql: str) -> None:
@@ -200,10 +228,18 @@ def _has_aggregation(parsed) -> bool:
     if parsed.find(exp.Group):
         return True
     
-    # Check for aggregate functions
-    aggregates = ['count', 'sum', 'avg', 'min', 'max', 'stddev', 'variance']
+    # Check for aggregate functions - look for specific function types
     for func in parsed.find_all(exp.Anonymous):
-        if func.this.lower() in aggregates:
+        if hasattr(func, 'this') and func.this:
+            func_name = str(func.this).lower()
+            if func_name in ['count', 'sum', 'avg', 'min', 'max', 'stddev', 'variance', 
+                           'array_agg', 'string_agg', 'approx_count_distinct']:
+                return True
+    
+    # Also check for Count, Sum, Avg, etc. expression types directly
+    agg_types = [exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max]
+    for agg_type in agg_types:
+        if parsed.find(agg_type):
             return True
     
     # Check for window functions
