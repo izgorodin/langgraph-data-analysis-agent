@@ -82,10 +82,26 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
 
 def validate_sql_node(state: AgentState) -> AgentState:
+    """Enhanced SQL validation with comprehensive security checks."""
+    
+    # Pre-parsing security checks
+    try:
+        _check_injection_patterns(state.sql)
+        _check_multi_statement(state.sql)
+    except Exception as e:
+        state.error = str(e)
+        return state
+    
+    # Parse SQL
     try:
         parsed = sqlglot.parse_one(state.sql, read="bigquery")
     except Exception as e:
         state.error = f"SQL parse error: {e}"
+        return state
+
+    # Handle empty/invalid parsed results
+    if parsed is None:
+        state.error = "Invalid or empty SQL query"
         return state
 
     # Policy: SELECT only
@@ -99,14 +115,110 @@ def validate_sql_node(state: AgentState) -> AgentState:
         state.error = f"Disallowed tables: {tables - ALLOWED}"
         return state
 
+    # Enhanced aggregation detection for LIMIT injection
+    has_aggregation = _has_aggregation(parsed)
+    
     # Optional: LIMIT for non-aggregates
-    if not parsed.find(exp.Group):
+    if not has_aggregation:
         # enforce LIMIT 1000 if missing
         if not parsed.args.get("limit"):
             parsed.set("limit", exp.Limit(this=exp.Literal.number(1000)))
         state.sql = parsed.sql(dialect="bigquery")
 
     return state
+
+
+def _check_injection_patterns(sql: str) -> None:
+    """Check for common SQL injection patterns."""
+    sql_lower = sql.lower().strip()
+    
+    # Check for multi-statement indicators
+    if ';' in sql and not sql.strip().endswith(';'):
+        # Has semicolon but doesn't just end with it - likely multi-statement
+        raise ValueError("Multi-statement SQL detected - potential injection attempt")
+    
+    # Check for comment-based injection patterns
+    suspicious_comment_patterns = [
+        '--',  # Single line comments (can hide malicious code)
+        '/*',  # Multi-line comments start
+        '*/',  # Multi-line comments end
+    ]
+    
+    for pattern in suspicious_comment_patterns:
+        if pattern in sql:
+            # Allow comments only at the end of queries
+            if pattern == '--' and not sql.strip().endswith(sql[sql.find(pattern):]):
+                raise ValueError("Suspicious comment pattern detected - potential injection")
+            elif pattern in ['/*', '*/']:
+                raise ValueError("Multi-line comments not allowed - potential injection")
+    
+    # Check for dangerous keywords that shouldn't appear in SELECT-only queries
+    dangerous_keywords = [
+        'drop', 'create', 'alter', 'truncate', 'insert', 'update', 'delete', 
+        'merge', 'grant', 'revoke', 'exec', 'execute', 'sp_', 'xp_',
+        'information_schema', 'sys.', 'admin', 'password', 'secret'
+    ]
+    
+    for keyword in dangerous_keywords:
+        if keyword in sql_lower:
+            raise ValueError(f"Forbidden keyword '{keyword}' detected - potential security violation")
+
+
+def _check_multi_statement(sql: str) -> None:
+    """Check for multiple SQL statements."""
+    # Remove string literals and comments to avoid false positives
+    cleaned_sql = _remove_strings_and_comments(sql)
+    
+    # Count meaningful semicolons (not at the end)
+    semicolons = cleaned_sql.count(';')
+    if semicolons > 1 or (semicolons == 1 and not cleaned_sql.strip().endswith(';')):
+        raise ValueError("Multiple SQL statements not allowed")
+
+
+def _remove_strings_and_comments(sql: str) -> str:
+    """Remove string literals and comments from SQL to avoid false positives."""
+    import re
+    
+    # Remove single-quoted strings
+    sql = re.sub(r"'(?:[^'\\]|\\.)*'", "''", sql)
+    
+    # Remove double-quoted strings
+    sql = re.sub(r'"(?:[^"\\\\]|\\\\.)*"', '""', sql)
+    
+    # Remove single-line comments
+    sql = re.sub(r'--.*$', '', sql, flags=re.MULTILINE)
+    
+    # Remove multi-line comments
+    sql = re.sub(r'/\*.*?\*/', '', sql, flags=re.DOTALL)
+    
+    return sql
+
+
+def _has_aggregation(parsed) -> bool:
+    """Enhanced aggregation detection including window functions and DISTINCT."""
+    # Check for GROUP BY
+    if parsed.find(exp.Group):
+        return True
+    
+    # Check for aggregate functions
+    aggregates = ['count', 'sum', 'avg', 'min', 'max', 'stddev', 'variance']
+    for func in parsed.find_all(exp.Anonymous):
+        if func.this.lower() in aggregates:
+            return True
+    
+    # Check for window functions
+    if parsed.find(exp.Window):
+        return True
+    
+    # Check for DISTINCT
+    if parsed.find(exp.Distinct):
+        return True
+    
+    # Check for HAVING (implies aggregation)
+    if parsed.find(exp.Having):
+        return True
+    
+    return False
 
 
 # Node: execute_sql
