@@ -12,6 +12,7 @@ from sqlglot import exp
 from ..bq import get_schema, run_query
 from ..config import settings
 from ..llm import llm_completion
+from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
 from .state import AgentState
 
@@ -50,6 +51,19 @@ def _schema_map() -> Dict[str, list[str]]:
 
 def plan_node(state: AgentState) -> AgentState:
     schema = _schema_map()
+    
+    # Option to use enhanced LLM integration
+    if hasattr(state, 'use_enhanced_llm') and state.use_enhanced_llm:
+        try:
+            llm_integration = get_llm_integration()
+            plan = llm_integration.generate_plan_sync(state.question, schema)
+            state.plan_json = plan
+            return state
+        except Exception:
+            # Fallback to original implementation
+            pass
+    
+    # Original implementation for backward compatibility
     prompt = PLAN_TEMPLATE.render(question=state.question, schema=schema)
     raw = llm_completion(prompt, system=PLAN_SYSTEM)
     try:
@@ -71,6 +85,18 @@ def plan_node(state: AgentState) -> AgentState:
 
 
 def synthesize_sql_node(state: AgentState) -> AgentState:
+    # Option to use enhanced LLM integration
+    if hasattr(state, 'use_enhanced_llm') and state.use_enhanced_llm:
+        try:
+            llm_integration = get_llm_integration()
+            sql = llm_integration.generate_sql_sync(state.plan_json, list(ALLOWED))
+            state.sql = sql
+            return state
+        except Exception:
+            # Fallback to original implementation
+            pass
+    
+    # Original implementation for backward compatibility
     prompt = SQL_TEMPLATE.render(
         plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
     )
@@ -362,6 +388,20 @@ def analyze_df_node(state: AgentState) -> AgentState:
 
 
 def report_node(state: AgentState) -> AgentState:
+    # Option to use enhanced LLM integration
+    if hasattr(state, 'use_enhanced_llm') and state.use_enhanced_llm:
+        try:
+            llm_integration = get_llm_integration()
+            report = llm_integration.generate_report_sync(
+                state.question, state.plan_json, state.df_summary
+            )
+            state.report = report
+            return state
+        except Exception:
+            # Fallback to original implementation
+            pass
+    
+    # Original implementation for backward compatibility
     plan = json.dumps(state.plan_json, ensure_ascii=False)
     summary = json.dumps(state.df_summary, ensure_ascii=False)[:30000]
     prompt = f"Question: {state.question}\nPLAN: {plan}\nDF SUMMARY (truncated): {summary}\nWrite a concise executive insight with numeric evidence and 1–2 next questions."

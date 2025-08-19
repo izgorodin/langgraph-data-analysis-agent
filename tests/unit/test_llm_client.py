@@ -10,7 +10,7 @@ from src.llm import llm_completion, llm_fallback
 class TestLLMClient:
     """Test LLM client functionality with complete mocking."""
 
-    def test_llm_completion_basic(self, mock_gemini_client, sample_llm_responses):
+    def test_llm_completion_basic(self, mock_llm_manager, sample_llm_responses):
         """Test basic LLM completion functionality."""
         prompt = "Generate a business plan for analyzing sales data"
 
@@ -22,7 +22,7 @@ class TestLLMClient:
         assert "plan" in result.lower() or "task" in result.lower()
 
     def test_llm_completion_with_system_prompt(
-        self, mock_gemini_client, sample_llm_responses
+        self, mock_llm_manager, sample_llm_responses
     ):
         """Test LLM completion with system prompt."""
         prompt = "Analyze this data"

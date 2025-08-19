@@ -4,7 +4,7 @@ This module provides a unified interface for multiple LLM providers
 with intelligent fallback, cost tracking, and quality validation.
 """
 
-from .models import LLMResponse, LLMProvider, LLMRequest
+from .models import LLMResponse, LLMProvider, LLMRequest, LLMContext
 from .providers import GeminiProvider, BedrockProvider  
 from .manager import LLMProviderManager
 from .cost_tracker import CostTracker
@@ -17,6 +17,7 @@ __all__ = [
     "LLMResponse",
     "LLMProvider", 
     "LLMRequest",
+    "LLMContext",
     "GeminiProvider",
     "BedrockProvider",
     "LLMProviderManager",
