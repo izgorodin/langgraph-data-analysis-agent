@@ -300,8 +300,20 @@ def reset_global_client():
     src.bq._bq_client = original_client
 
 
+@pytest.fixture
+def reset_circuit_breaker():
+    """Reset circuit breaker for test isolation."""
+    import src.bq
+
+    # Reset circuit breaker before each test
+    src.bq.reset_circuit_breaker()
+    yield
+    # Reset again after test to ensure clean state
+    src.bq.reset_circuit_breaker()
+
+
 @pytest.fixture(autouse=True)
-def isolate_tests(reset_global_client, mock_env_vars):
+def isolate_tests(reset_global_client, reset_circuit_breaker, mock_env_vars):
     """Automatically isolate each test from global state and environment."""
     pass
 
