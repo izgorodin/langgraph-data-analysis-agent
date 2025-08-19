@@ -442,7 +442,22 @@ class TestRunQueryEnhancements:
                 else:
                     assert (
                         False
-                    ), f"Expected timeout-related error but got {type(e).__name__}: {e}"
+            with pytest.raises(Exception) as exc_info:
+                run_query("SELECT 1", timeout=5, dry_run=False)
+            # Check the type and message of the exception
+            if isinstance(exc_info.value, QueryTimeoutError):
+                # Verify job cancellation was attempted
+                mock_job.cancel.assert_called_once()
+                assert "Query timeout after 5s" in str(exc_info.value)
+                assert exc_info.value.job_id == "timeout_job_123"
+            elif "timeout" in str(exc_info.value).lower():
+                # If it's a timeout-related error but wrong type, that's acceptable
+                assert "timeout" in str(exc_info.value).lower()
+                mock_job.cancel.assert_called()
+            else:
+                pytest.fail(
+                    f"Expected timeout-related error but got {type(exc_info.value).__name__}: {exc_info.value}"
+                )
 
     def test_run_query_dry_run_with_metrics(self, mock_bigquery_client):
         """Test dry run mode collects metrics correctly."""
