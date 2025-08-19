@@ -84,7 +84,9 @@ class EcommerceDataGenerator:
         for i in range(count):
             category = random.choice(categories)
             cost = round(random.uniform(5.0, 200.0), 2)
-            retail_price = round(cost * random.uniform(1.5, 4.0), 2)  # Realistic markup
+            retail_price = round(
+                cost * random.uniform(self.MIN_MARKUP_MULTIPLIER, self.MAX_MARKUP_MULTIPLIER), 2
+            )  # Realistic markup
 
             product = {
                 "id": i + 1,
@@ -174,7 +176,9 @@ class EcommerceDataGenerator:
             for _, product in selected_products.iterrows():
                 # Apply realistic discounts
                 base_price = product["retail_price"]
-                discount_factor = random.uniform(0.7, 1.0)  # 0-30% discount
+                discount_factor = random.uniform(
+                    self.MIN_DISCOUNT_FACTOR, self.MAX_DISCOUNT_FACTOR
+                )  # 0-30% discount
                 sale_price = round(base_price * discount_factor, 2)
 
                 # Inherit some timing from order

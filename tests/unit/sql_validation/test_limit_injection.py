@@ -291,4 +291,6 @@ class TestLimitEdgeCases:
                 if "LIMIT" in result.sql and "LIMIT" not in query:
                     pytest.fail(
                         f"LIMIT incorrectly added to nested aggregation: {query}"
-                    )
+                assert "LIMIT" not in result.sql or "LIMIT" in query, (
+                    f"LIMIT incorrectly added to nested aggregation: {query}"
+                )

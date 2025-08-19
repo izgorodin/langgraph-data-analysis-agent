@@ -93,7 +93,7 @@ class TestBigQueryDialectParsing:
 
             assert result.error is None
             # Window functions should be treated as aggregating - no auto-LIMIT
-            if "LIMIT" in result.sql and "LIMIT" not in query:
+            if was_limit_injected(query, result.sql):
                 pytest.fail(f"Window function incorrectly got auto-LIMIT: {query}")
 
     def test_bigquery_mathematical_functions(self):
