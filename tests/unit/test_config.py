@@ -1,8 +1,9 @@
 """Unit tests for configuration management."""
 
 import os
-import pytest
 from unittest.mock import patch
+
+import pytest
 
 from src.config import Settings, settings
 
@@ -14,7 +15,7 @@ class TestConfiguration:
         """Test that settings have appropriate default values."""
         with patch.dict(os.environ, {}, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.google_api_key == ""
             assert test_settings.bq_project == ""
             assert test_settings.bq_location == "US"
@@ -35,12 +36,12 @@ class TestConfiguration:
             "MAX_BYTES_BILLED": "100000000",
             "MODEL_NAME": "gemini-1.5-pro",
             "AWS_REGION": "us-east-1",
-            "BEDROCK_MODEL_ID": "test-bedrock-model"
+            "BEDROCK_MODEL_ID": "test-bedrock-model",
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.google_api_key == "test-api-key"
             assert test_settings.bq_project == "test-project"
             assert test_settings.bq_location == "US"
@@ -53,46 +54,56 @@ class TestConfiguration:
     def test_allowed_tables_parsing(self):
         """Test parsing of allowed tables from environment variable."""
         test_env = {"ALLOWED_TABLES": "orders,order_items,products,users"}
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
-            assert test_settings.allowed_tables == ("orders", "order_items", "products", "users")
+
+            assert test_settings.allowed_tables == (
+                "orders",
+                "order_items",
+                "products",
+                "users",
+            )
             assert isinstance(test_settings.allowed_tables, tuple)
 
     def test_allowed_tables_with_spaces(self):
         """Test parsing of allowed tables with spaces."""
         test_env = {"ALLOWED_TABLES": " orders , order_items , products , users "}
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             # Should strip whitespace
-            assert test_settings.allowed_tables == ("orders", "order_items", "products", "users")
+            assert test_settings.allowed_tables == (
+                "orders",
+                "order_items",
+                "products",
+                "users",
+            )
 
     def test_allowed_tables_single_table(self):
         """Test parsing when only one table is allowed."""
         test_env = {"ALLOWED_TABLES": "orders"}
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.allowed_tables == ("orders",)
 
     def test_max_bytes_billed_conversion(self):
         """Test conversion of max_bytes_billed to integer."""
         test_env = {"MAX_BYTES_BILLED": "500000000"}
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.max_bytes_billed == 500000000
             assert isinstance(test_settings.max_bytes_billed, int)
 
     def test_max_bytes_billed_invalid_value(self):
         """Test handling of invalid max_bytes_billed value."""
         test_env = {"MAX_BYTES_BILLED": "not_a_number"}
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             with pytest.raises(ValueError):
                 Settings()
@@ -101,34 +112,41 @@ class TestConfiguration:
         """Test that global settings instance exists and is accessible."""
         assert settings is not None
         assert isinstance(settings, Settings)
-        
+
         # Test that it has expected attributes
-        assert hasattr(settings, 'google_api_key')
-        assert hasattr(settings, 'bq_project')
-        assert hasattr(settings, 'model_name')
+        assert hasattr(settings, "google_api_key")
+        assert hasattr(settings, "bq_project")
+        assert hasattr(settings, "model_name")
 
     def test_dotenv_loading(self):
         """Test that .env file loading works."""
         # This tests that load_dotenv() is called during import
         # In a real test, we'd create a temporary .env file
-        
+
         # Just verify that dotenv functionality is available
         from dotenv import load_dotenv
+
         assert load_dotenv is not None
 
     def test_settings_dataclass_behavior(self):
         """Test that Settings behaves as a proper dataclass."""
         test_settings = Settings()
-        
+
         # Test attribute access
-        assert hasattr(test_settings, '__dataclass_fields__')
-        
+        assert hasattr(test_settings, "__dataclass_fields__")
+
         # Test field names
         field_names = set(test_settings.__dataclass_fields__.keys())
         expected_fields = {
-            'google_api_key', 'bq_project', 'bq_location', 'dataset_id',
-            'allowed_tables', 'max_bytes_billed', 'model_name', 
-            'aws_region', 'bedrock_model_id'
+            "google_api_key",
+            "bq_project",
+            "bq_location",
+            "dataset_id",
+            "allowed_tables",
+            "max_bytes_billed",
+            "model_name",
+            "aws_region",
+            "bedrock_model_id",
         }
         assert field_names == expected_fields
 
@@ -136,7 +154,7 @@ class TestConfiguration:
         """Test that settings can be modified (dataclass is mutable by default)."""
         test_settings = Settings()
         original_project = test_settings.bq_project
-        
+
         # Should be able to modify
         test_settings.bq_project = "new-project"
         assert test_settings.bq_project == "new-project"
@@ -152,10 +170,10 @@ class TestConfiguration:
             "ALLOWED_TABLES": "orders,order_items,products,users",
             "MAX_BYTES_BILLED": "100000000",
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             # All BigQuery-related settings should be configured
             assert test_settings.bq_project
             assert test_settings.bq_location
@@ -169,10 +187,10 @@ class TestConfiguration:
             "GOOGLE_API_KEY": "test-api-key",
             "MODEL_NAME": "gemini-1.5-pro",
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             # LLM-related settings should be configured
             assert test_settings.google_api_key
             assert test_settings.model_name
@@ -182,16 +200,16 @@ class TestConfiguration:
         """Test that sensitive data like API keys are handled properly."""
         test_env = {
             "GOOGLE_API_KEY": "sk-super-secret-key-123",
-            "BEDROCK_MODEL_ID": "secret-model"
+            "BEDROCK_MODEL_ID": "secret-model",
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             # Values should be stored (this is expected)
             assert test_settings.google_api_key == "sk-super-secret-key-123"
             assert test_settings.bedrock_model_id == "secret-model"
-            
+
             # In a real application, you might want to test that these
             # aren't logged or exposed inappropriately
 
@@ -201,9 +219,9 @@ class TestConfiguration:
         valid_dataset_ids = [
             "bigquery-public-data.thelook_ecommerce",
             "my-project.my_dataset",
-            "project123.dataset_456"
+            "project123.dataset_456",
         ]
-        
+
         for dataset_id in valid_dataset_ids:
             test_env = {"DATASET_ID": dataset_id}
             with patch.dict(os.environ, test_env, clear=True):
@@ -214,11 +232,11 @@ class TestConfiguration:
         """Test different model name configurations."""
         model_names = [
             "gemini-1.5-pro",
-            "gemini-1.5-flash", 
+            "gemini-1.5-flash",
             "gemini-1.0-pro",
-            "custom-model-name"
+            "custom-model-name",
         ]
-        
+
         for model_name in model_names:
             test_env = {"MODEL_NAME": model_name}
             with patch.dict(os.environ, test_env, clear=True):
@@ -227,13 +245,8 @@ class TestConfiguration:
 
     def test_aws_region_configuration(self):
         """Test AWS region configuration for Bedrock fallback."""
-        aws_regions = [
-            "us-east-1",
-            "us-west-2", 
-            "eu-west-1",
-            "ap-southeast-1"
-        ]
-        
+        aws_regions = ["us-east-1", "us-west-2", "eu-west-1", "ap-southeast-1"]
+
         for region in aws_regions:
             test_env = {"AWS_REGION": region}
             with patch.dict(os.environ, test_env, clear=True):
@@ -247,7 +260,7 @@ class TestConfiguration:
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
             assert test_settings.allowed_tables == ("",)  # Single empty string
-        
+
         # Zero max bytes billed
         test_env = {"MAX_BYTES_BILLED": "0"}
         with patch.dict(os.environ, test_env, clear=True):
@@ -257,11 +270,11 @@ class TestConfiguration:
     def test_configuration_repr_and_str(self):
         """Test string representation of settings."""
         test_settings = Settings()
-        
+
         # Should have readable string representation
         str_repr = str(test_settings)
         assert "Settings" in str_repr
-        
+
         # repr should be valid Python code (dataclass default)
         repr_str = repr(test_settings)
         assert "Settings(" in repr_str
@@ -270,10 +283,10 @@ class TestConfiguration:
         """Test equality comparison of settings instances."""
         settings1 = Settings()
         settings2 = Settings()
-        
+
         # Should be equal if constructed with same environment
         assert settings1 == settings2
-        
+
         # Should be different if modified
         settings2.bq_project = "different-project"
         assert settings1 != settings2
@@ -285,10 +298,10 @@ class TestConfiguration:
             "GOOGLE_API_KEY": "",  # Empty but present
             "BEDROCK_MODEL_ID": "",  # Empty but present
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             # Should use defaults for missing values
             assert test_settings.google_api_key == ""
             assert test_settings.bedrock_model_id == ""
@@ -300,12 +313,12 @@ class TestConfiguration:
         test_env = {
             "BIGQUERY_LOCATION": "EU",  # Override default "US"
             "MODEL_NAME": "custom-model",  # Override default "gemini-1.5-pro"
-            "MAX_BYTES_BILLED": "999999999"  # Override default
+            "MAX_BYTES_BILLED": "999999999",  # Override default
         }
-        
+
         with patch.dict(os.environ, test_env, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.bq_location == "EU"
             assert test_settings.model_name == "custom-model"
             assert test_settings.max_bytes_billed == 999999999

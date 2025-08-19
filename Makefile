@@ -15,16 +15,16 @@ dev-install: ## Install development dependencies
 	.venv/bin/pre-commit install
 
 test: ## Run tests
-	.venv/bin/pytest --cov=src --cov-report=term-missing --cov-report=html
+	PYTHONPATH=. .venv/bin/pytest --cov=src --cov-report=term-missing --cov-report=html
 
 test-unit: ## Run unit tests only
-	.venv/bin/pytest tests/unit/ -v
+	PYTHONPATH=. .venv/bin/pytest tests/unit/ -v
 
 test-integration: ## Run integration tests only
-	.venv/bin/pytest tests/integration/ -v -m "not requires_credentials"
+	PYTHONPATH=. .venv/bin/pytest tests/integration/ -v -m "not requires_credentials"
 
 test-security: ## Run security tests
-	.venv/bin/pytest tests/security/ -v
+	PYTHONPATH=. .venv/bin/pytest tests/security/ -v
 
 lint: ## Run linting
 	.venv/bin/black --check src tests
