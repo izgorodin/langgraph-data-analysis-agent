@@ -106,6 +106,7 @@ ignore_missing_imports = true
 minversion = "6.0"
 addopts = "-ra -q --strict-markers --strict-config"
 testpaths = ["tests"]
+pythonpath = ["."]
 markers = [
     "unit: Unit tests",
     "integration: Integration tests", 
