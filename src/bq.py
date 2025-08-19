@@ -67,6 +67,8 @@ def bq_client() -> bigquery.Client:
     return _bq_client
 
 
+# nosec B608: SCHEMA_QUERY is a static template with parameter binding via
+# QueryJobConfig; dataset comes from settings and not user input
 SCHEMA_QUERY = (
     """
 SELECT table_name, column_name, data_type

@@ -6,7 +6,8 @@ import google.generativeai as genai
 
 from .config import settings
 
-# Configure Gemini
+# Configure Gemini (API key comes from environment via settings;
+# no hardcoded secret)
 if settings.google_api_key:
     genai.configure(api_key=settings.google_api_key)
 
