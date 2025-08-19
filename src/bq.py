@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional
@@ -33,6 +36,45 @@ class QueryMetrics:
 _bq_client: Optional[bigquery.Client] = None
 
 
+def _resolve_bq_credentials():
+    """Resolve BigQuery credentials from env per LGDA-005.
+
+    Priority:
+    1) BIGQUERY_CREDENTIALS_JSON (base64-encoded service account JSON)
+    2) GOOGLE_APPLICATION_CREDENTIALS (file path)
+    3) ADC (default)
+    Returns tuple (credentials, project) suitable for bigquery.Client kwargs.
+    """
+    creds = None
+    project = settings.bq_project or None
+
+    b64_json = os.getenv("BIGQUERY_CREDENTIALS_JSON")
+    if b64_json:
+        try:
+            from google.oauth2 import service_account  # type: ignore
+
+            data = json.loads(base64.b64decode(b64_json).decode("utf-8"))
+            creds = service_account.Credentials.from_service_account_info(data)
+            project = project or data.get("project_id")
+            return creds, project
+        except Exception:
+            # fall through to other methods
+            pass
+
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if cred_path and os.path.exists(cred_path):
+        try:
+            from google.oauth2 import service_account  # type: ignore
+
+            creds = service_account.Credentials.from_service_account_file(cred_path)
+            # project may be None; BQ SDK can infer from creds
+            return creds, project
+        except Exception:
+            pass
+
+    return None, project
+
+
 def bq_client() -> bigquery.Client:
     """
     Get BigQuery client with authentication fallback strategy.
@@ -45,11 +87,15 @@ def bq_client() -> bigquery.Client:
     global _bq_client
     if _bq_client is None:
         try:
+            creds, project = _resolve_bq_credentials()
             # Try to create client with current configuration
-            _bq_client = bigquery.Client(
-                project=settings.bq_project or None,  # None allows auto-detection
-                location=settings.bq_location,
-            )
+            client_kwargs = {
+                "project": project,  # None allows auto-detection
+                "location": settings.bq_location,
+            }
+            if creds is not None:
+                client_kwargs["credentials"] = creds
+            _bq_client = bigquery.Client(**client_kwargs)
             logging.info(
                 f"BigQuery client initialized for project: {settings.bq_project}"
             )

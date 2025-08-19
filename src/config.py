@@ -1,6 +1,14 @@
 import os
 from dataclasses import dataclass, field
 
+try:
+    # Auto-load .env early (dev convenience). Safe if not present.
+    from dotenv import load_dotenv  # type: ignore
+
+    load_dotenv()
+except ImportError:
+    pass
+
 
 @dataclass
 class Settings:
@@ -11,6 +19,7 @@ class Settings:
     dataset_id: str = field(default="bigquery-public-data.thelook_ecommerce")
     allowed_tables: tuple[str, ...] = field(
         default_factory=lambda: ("orders", "order_items", "products", "users")
+    )
     max_bytes_billed: int = field(default=100000000)
     model_name: str = field(default="gemini-1.5-pro")
     aws_region: str = field(default="eu-west-1")
