@@ -110,14 +110,15 @@ def llm_completion(
     use_provider = True
     if use_provider:
         # Use Gemini provider directly to align with legacy expectations
-        if model and model.startswith("openai/"):
+        effective_model = model or settings.model_name
+        if effective_model and effective_model.startswith("openai/"):
             provider = NvidiaOpenAIProvider()
         else:
             provider = GeminiProvider()
-        if model:
+        if effective_model:
             # Override model when explicitly provided
             try:
-                provider.model_name = model  # type: ignore[attr-defined]
+                provider.model_name = effective_model  # type: ignore[attr-defined]
             except AttributeError:
                 logger.debug("Provider has no model_name override")
 
