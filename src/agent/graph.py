@@ -33,9 +33,43 @@ def build_graph():
     graph.add_conditional_edges(
         "validate_sql", on_valid, {"execute_sql": "execute_sql", END: END}
     )
-    graph.add_edge("execute_sql", "analyze_df")
+
+    def on_exec(state: AgentState):
+        return "analyze_df" if state.error is None else END
+
+    graph.add_conditional_edges(
+        "execute_sql", on_exec, {"analyze_df": "analyze_df", END: END}
+    )
     graph.add_edge("analyze_df", "report")
     graph.add_edge("report", END)
 
     app = graph.compile()
-    return app
+
+    # Wrap to ensure invoke returns AgentState and stream yields JSON-safe dicts
+    class _AppWrapper:
+        def __init__(self, inner):
+            self._inner = inner
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def invoke(self, state, *args, **kwargs):
+            result = self._inner.invoke(state, *args, **kwargs)
+            try:
+                return (
+                    result if isinstance(result, AgentState) else AgentState(**result)
+                )
+            except Exception:
+                return result
+
+        def stream(self, state, *args, **kwargs):
+            for event in self._inner.stream(state, *args, **kwargs):
+                converted = {}
+                for node, s in event.items():
+                    if isinstance(s, AgentState):
+                        converted[node] = s.model_dump()
+                    else:
+                        converted[node] = s
+                yield converted
+
+    return _AppWrapper(app)
