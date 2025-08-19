@@ -21,7 +21,7 @@
 **Configuration Hierarchy**:
 ```
 1. Environment variables (highest priority)
-2. .env files (development)  
+2. .env files (development)
 3. Config files (defaults)
 4. Hard-coded defaults (fallback)
 ```
@@ -44,49 +44,49 @@ class LGDAConfig(BaseSettings):
     Главная конфигурация LGDA agent
     Использует Pydantic для validation и type safety
     """
-    
+
     # Environment identification
     environment: str = Field(default="development", env="LGDA_ENVIRONMENT")
     debug: bool = Field(default=False, env="LGDA_DEBUG")
     log_level: str = Field(default="INFO", env="LGDA_LOG_LEVEL")
-    
+
     # BigQuery configuration
     bigquery_project_id: str = Field(..., env="LGDA_BIGQUERY_PROJECT_ID")
     bigquery_dataset: str = Field(
-        default="bigquery-public-data.thelook_ecommerce", 
+        default="bigquery-public-data.thelook_ecommerce",
         env="LGDA_BIGQUERY_DATASET"
     )
     bigquery_location: str = Field(default="US", env="LGDA_BIGQUERY_LOCATION")
     bigquery_credentials_path: Optional[str] = Field(None, env="LGDA_BIGQUERY_CREDENTIALS")
-    
-    # LLM configuration  
+
+    # LLM configuration
     llm_primary_provider: str = Field(default="gemini", env="LGDA_LLM_PRIMARY")
     llm_fallback_provider: str = Field(default="bedrock", env="LGDA_LLM_FALLBACK")
     gemini_api_key: Optional[str] = Field(None, env="LGDA_GEMINI_API_KEY")
     gemini_project_id: Optional[str] = Field(None, env="LGDA_GEMINI_PROJECT_ID")
     bedrock_region: str = Field(default="us-east-1", env="LGDA_BEDROCK_REGION")
-    
+
     # Security policies
     sql_max_limit: int = Field(default=1000, env="LGDA_SQL_MAX_LIMIT")
     allowed_tables: List[str] = Field(
         default=["orders", "order_items", "products", "users"],
         env="LGDA_ALLOWED_TABLES"
     )
-    
+
     @validator('environment')
     def validate_environment(cls, v):
         allowed = ['development', 'staging', 'production']
         if v not in allowed:
             raise ValueError(f'environment must be one of {allowed}')
         return v
-    
-    @validator('log_level')  
+
+    @validator('log_level')
     def validate_log_level(cls, v):
         allowed = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         if v not in allowed:
             raise ValueError(f'log_level must be one of {allowed}')
         return v
-    
+
     class Config:
         env_file = '.env'
         env_file_encoding = 'utf-8'
@@ -94,13 +94,13 @@ class LGDAConfig(BaseSettings):
 
 def test_config_validation():
     """Валидирует configuration constraints"""
-    
+
 def test_environment_variable_override():
     """Environment variables override defaults"""
-    
+
 def test_missing_required_config():
     """Raises error для missing required config"""
-    
+
 def test_type_conversion():
     """Корректно конвертирует types из environment variables"""
 ```
@@ -124,11 +124,11 @@ from pathlib import Path
 
 class CredentialManager:
     """Secure credential management"""
-    
+
     def __init__(self, config: LGDAConfig):
         self.config = config
         self.secrets_cache = {}
-    
+
     def get_bigquery_credentials(self) -> Union[str, dict]:
         """
         BigQuery credential resolution:
@@ -138,18 +138,18 @@ class CredentialManager:
         """
         if creds_json := os.getenv('LGDA_BIGQUERY_CREDENTIALS_JSON'):
             return json.loads(base64.b64decode(creds_json))
-        
+
         if self.config.bigquery_credentials_path:
             return str(Path(self.config.bigquery_credentials_path).resolve())
-        
+
         return None  # Use Application Default Credentials
-    
+
     def get_gemini_credentials(self) -> dict:
         """Gemini API credentials"""
-        
+
     def get_bedrock_credentials(self) -> dict:
         """AWS Bedrock credentials"""
-    
+
     def mask_sensitive_data(self, data: dict) -> dict:
         """Masks sensitive data для logging"""
         sensitive_keys = ['api_key', 'secret', 'password', 'token', 'credentials']
@@ -161,13 +161,13 @@ class CredentialManager:
 
 def test_credential_masking():
     """Sensitive data замаскирована в logs"""
-    
+
 def test_credential_source_priority():
     """Использует правильный credential source"""
-    
+
 def test_credential_validation():
     """Валидирует credential format"""
-    
+
 def test_no_credential_leakage():
     """Credentials не появляются в error messages"""
 ```
@@ -208,9 +208,9 @@ ENVIRONMENT_PROFILES = {
             'cache_ttl': 300,
         }
     ),
-    
+
     'staging': EnvironmentProfile(
-        name='staging', 
+        name='staging',
         config_overrides={
             'debug': False,
             'log_level': 'INFO',
@@ -227,7 +227,7 @@ ENVIRONMENT_PROFILES = {
             'cache_ttl': 600,
         }
     ),
-    
+
     'production': EnvironmentProfile(
         name='production',
         config_overrides={
@@ -251,10 +251,10 @@ ENVIRONMENT_PROFILES = {
 
 def test_environment_profile_loading():
     """Корректно загружает environment profiles"""
-    
+
 def test_profile_override_precedence():
     """Profile overrides применяются правильно"""
-    
+
 def test_feature_flag_evaluation():
     """Feature flags work correctly"""
 ```
@@ -279,12 +279,12 @@ class FeatureFlag(Enum):
 
 class FeatureFlagManager:
     """Runtime feature flag evaluation"""
-    
+
     def __init__(self, config: LGDAConfig, profile: EnvironmentProfile):
         self.config = config
         self.profile = profile
         self.custom_rules = {}
-    
+
     def is_enabled(self, flag: FeatureFlag, context: dict = None) -> bool:
         """
         Feature flag evaluation с context:
@@ -295,19 +295,19 @@ class FeatureFlagManager:
         """
         if custom_rule := self.custom_rules.get(flag):
             return custom_rule(context or {})
-        
+
         return self.profile.feature_flags.get(flag.value, False)
-    
+
     def add_custom_rule(self, flag: FeatureFlag, rule: Callable[[dict], bool]):
         """Добавляет custom evaluation rule"""
         self.custom_rules[flag] = rule
 
 def test_feature_flag_evaluation():
     """Feature flags evaluate correctly"""
-    
+
 def test_custom_rule_precedence():
     """Custom rules override profile settings"""
-    
+
 def test_context_dependent_flags():
     """Context влияет на flag evaluation"""
 ```
@@ -321,25 +321,25 @@ def test_context_dependent_flags():
 @dataclass
 class PerformanceConfig:
     """Performance tuning parameters"""
-    
+
     # BigQuery settings
     query_timeout: int = 300
     max_concurrent_queries: int = 5
     result_cache_ttl: int = 1800
-    
-    # LLM settings  
+
+    # LLM settings
     llm_timeout: int = 30
     llm_retry_count: int = 3
     llm_max_tokens: int = 2000
-    
+
     # Memory management
     max_dataframe_rows: int = 10000
     max_memory_mb: int = 512
-    
+
     # Caching
     enable_query_cache: bool = True
     cache_compression: bool = True
-    
+
     @classmethod
     def for_environment(cls, environment: str) -> 'PerformanceConfig':
         """Factory method для environment-specific performance config"""
@@ -353,7 +353,7 @@ class PerformanceConfig:
         elif environment == 'production':
             return cls(
                 query_timeout=300,
-                max_concurrent_queries=10, 
+                max_concurrent_queries=10,
                 max_dataframe_rows=50000,
                 max_memory_mb=1024,
             )
@@ -362,7 +362,7 @@ class PerformanceConfig:
 
 def test_performance_config_scaling():
     """Performance settings scale по environment"""
-    
+
 def test_resource_limit_enforcement():
     """Resource limits строго соблюдаются"""
 ```
@@ -373,33 +373,33 @@ def test_resource_limit_enforcement():
 ```python
 class ConfigFactory:
     """Central configuration factory"""
-    
+
     @staticmethod
     def create_config() -> LGDAConfig:
         """Creates fully configured LGDA config"""
         base_config = LGDAConfig()
         profile = ENVIRONMENT_PROFILES[base_config.environment]
-        
+
         # Apply environment overrides
         for key, value in profile.config_overrides.items():
             setattr(base_config, key, value)
-        
+
         return base_config
-    
+
     @staticmethod
     def create_managers(config: LGDAConfig) -> tuple:
         """Creates all configuration managers"""
         profile = ENVIRONMENT_PROFILES[config.environment]
-        
+
         credential_manager = CredentialManager(config)
         feature_manager = FeatureFlagManager(config, profile)
         performance_config = PerformanceConfig.for_environment(config.environment)
-        
+
         return credential_manager, feature_manager, performance_config
 
 def test_config_factory_integration():
     """Config factory создает consistent configuration"""
-    
+
 def test_manager_coordination():
     """All managers работают together"""
 ```
@@ -410,13 +410,13 @@ from typing import Protocol
 
 class ConfigProvider(Protocol):
     """Configuration provider interface для DI"""
-    
+
     def get_config(self) -> LGDAConfig:
         """Returns main configuration"""
-    
+
     def get_credentials(self, service: str) -> dict:
         """Returns service credentials"""
-    
+
     def is_feature_enabled(self, flag: FeatureFlag) -> bool:
         """Checks feature flag"""
 
@@ -426,11 +426,11 @@ async def synthesize_sql_node(
     config_provider: ConfigProvider
 ) -> AgentState:
     """SQL synthesis node с configuration injection"""
-    
+
     if config_provider.is_feature_enabled(FeatureFlag.ENABLE_SQL_OPTIMIZATION):
         # Use advanced SQL optimization
         pass
-    
+
     max_limit = config_provider.get_config().sql_max_limit
     # Apply limit to generated SQL
 ```
@@ -441,10 +441,10 @@ async def synthesize_sql_node(
 ```python
 def test_config_schema_compliance():
     """Configuration соответствует expected schema"""
-    
+
 def test_required_field_validation():
     """Required fields validation работает"""
-    
+
 def test_type_safety():
     """Type annotations enforced"""
 
@@ -456,10 +456,10 @@ def test_constraint_validation():
 ```python
 def test_all_environments_valid():
     """Все environments загружаются successfully"""
-    
+
 def test_environment_isolation():
     """Environment configurations isolated"""
-    
+
 def test_production_security():
     """Production configuration secure"""
 ```
@@ -530,3 +530,29 @@ tests/fixtures/config/
 - **Зависит от**: LGDA-001 (test infrastructure)
 - **Используется в**: Все components (LGDA-003, LGDA-004, LGDA-006, etc.)
 - **Критично для**: LGDA-012 (production deployment), LGDA-014 (monitoring)
+
+## Совместимость ENV и миграция
+
+Для безопасной миграции поддержать legacy и новые LGDA_* переменные с приоритетом LGDA_*:
+
+- GOOGLE_API_KEY ↔ LGDA_GEMINI_API_KEY
+- BIGQUERY_PROJECT ↔ LGDA_BIGQUERY_PROJECT_ID
+- BIGQUERY_LOCATION ↔ LGDA_BIGQUERY_LOCATION
+- DATASET_ID ↔ LGDA_BIGQUERY_DATASET
+- MAX_BYTES_BILLED ↔ LGDA_SQL_MAX_LIMIT (семантика лимитов описана в политике)
+- AWS_REGION / BEDROCK_MODEL_ID ↔ LGDA_BEDROCK_REGION / (соответствующие)
+- BIGQUERY_CREDENTIALS_JSON и GOOGLE_APPLICATION_CREDENTIALS — без префикса (де‑факто стандарт)
+
+В логах не показывать значения секретов; при использовании legacy имён выводить мягкое предупреждение и рекомендовать LGDA_*.
+
+## Фазовый план внедрения
+
+1) LGDAConfig (Pydantic BaseSettings): схема, валидации, приоритет ENV > .env > defaults, двустороннее отображение legacy/LGDA_*.
+2) CredentialManager: источники (base64 JSON → file path → ADC), маскирование секретов.
+3) Environment Profiles + Feature Flags: dev/staging/prod, системные флаги, лимиты.
+4) Интеграция (DI): ConfigFactory/менеджеры в узлах; минимум — sql_max_limit, таймауты и лимиты BQ.
+
+## Non‑goals (в этом инкременте)
+
+- Полная миграция всех модулей на DI за один шаг (итеративно).
+- Интеграция с внешними секрет‑менеджерами (вынести в отдельную задачу).
