@@ -7,13 +7,13 @@ from unittest.mock import patch
 import pytest
 
 from src.config import (
-    LGDAConfig,
+    ENVIRONMENT_PROFILES,
+    ConfigFactory,
     CredentialManager,
     FeatureFlag,
     FeatureFlagManager,
+    LGDAConfig,
     PerformanceConfig,
-    ConfigFactory,
-    ENVIRONMENT_PROFILES,
 )
 
 
@@ -32,7 +32,12 @@ class TestLGDAConfig:
             assert config.bigquery_dataset == "bigquery-public-data.thelook_ecommerce"
             assert config.bigquery_location == "US"
             assert config.sql_max_limit == 1000
-            assert config.allowed_tables == ["orders", "order_items", "products", "users"]
+            assert config.allowed_tables == [
+                "orders",
+                "order_items",
+                "products",
+                "users",
+            ]
 
     def test_config_environment_override(self):
         """Test that LGDA_* environment variables override defaults."""
@@ -265,9 +270,7 @@ class TestFeatureFlags:
         flag_manager = FeatureFlagManager(config, profile)
 
         # Add custom rule that always returns True
-        flag_manager.add_custom_rule(
-            FeatureFlag.ENABLE_QUERY_CACHE, lambda ctx: True
-        )
+        flag_manager.add_custom_rule(FeatureFlag.ENABLE_QUERY_CACHE, lambda ctx: True)
 
         # Should return True despite development profile having it disabled
         assert flag_manager.is_enabled(FeatureFlag.ENABLE_QUERY_CACHE)
@@ -321,7 +324,9 @@ class TestConfigFactory:
     def test_config_factory_create_managers(self):
         """Test config factory creates all managers."""
         config = LGDAConfig()
-        cred_manager, feature_manager, perf_config = ConfigFactory.create_managers(config)
+        cred_manager, feature_manager, perf_config = ConfigFactory.create_managers(
+            config
+        )
 
         assert isinstance(cred_manager, CredentialManager)
         assert isinstance(feature_manager, FeatureFlagManager)
@@ -359,7 +364,9 @@ class TestConfigIntegration:
             assert config.gemini_api_key == "test-key"
 
             # Create managers
-            cred_manager, feature_manager, perf_config = ConfigFactory.create_managers(config)
+            cred_manager, feature_manager, perf_config = ConfigFactory.create_managers(
+                config
+            )
 
             # Test credential management
             gemini_creds = cred_manager.get_gemini_credentials()
@@ -368,7 +375,7 @@ class TestConfigIntegration:
             # Test feature flags
             assert feature_manager.is_enabled(FeatureFlag.ENABLE_QUERY_CACHE)
 
-            # Test performance config - uses staging environment 
+            # Test performance config - uses staging environment
             perf_config_staging = PerformanceConfig.for_environment("staging")
             assert perf_config_staging.query_timeout == 300  # Uses default for staging
 
@@ -399,7 +406,8 @@ class TestConfigIntegration:
 
                 # Should have deprecation warnings
                 deprecation_warnings = [
-                    warning for warning in w 
+                    warning
+                    for warning in w
                     if issubclass(warning.category, DeprecationWarning)
                 ]
                 assert len(deprecation_warnings) > 0

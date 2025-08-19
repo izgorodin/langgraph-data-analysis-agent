@@ -16,6 +16,7 @@ class LLMProvider(str, Enum):
 
     GEMINI = "gemini"
     BEDROCK = "bedrock"
+    NVIDIA = "nvidia"
 
 
 class LLMContext(str, Enum):

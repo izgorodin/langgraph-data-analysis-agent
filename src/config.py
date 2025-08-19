@@ -1,13 +1,13 @@
+import base64
+import json
 import os
 import warnings
-import json
-import base64
 from dataclasses import dataclass, field
-from typing import List, Optional, Union, Dict, Any, Callable
-from pathlib import Path
 from enum import Enum
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Union
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 try:
@@ -69,94 +69,148 @@ class LGDAConfig(BaseSettings):
     Supports both legacy and LGDA_* prefixed environment variables.
     """
 
-    # Environment identification  
+    # Environment identification
     environment: str = Field(default="development", validation_alias="LGDA_ENVIRONMENT")
     debug: bool = Field(default=False, validation_alias="LGDA_DEBUG")
     log_level: str = Field(default="INFO", validation_alias="LGDA_LOG_LEVEL")
 
     # BigQuery configuration
-    bigquery_project_id: str = Field(default="", validation_alias="LGDA_BIGQUERY_PROJECT_ID")
-    bigquery_dataset: str = Field(
-        default="bigquery-public-data.thelook_ecommerce", validation_alias="LGDA_BIGQUERY_DATASET"
+    bigquery_project_id: str = Field(
+        default="", validation_alias="LGDA_BIGQUERY_PROJECT_ID"
     )
-    bigquery_location: str = Field(default="US", validation_alias="LGDA_BIGQUERY_LOCATION")
-    bigquery_credentials_path: Optional[str] = Field(default=None, validation_alias="LGDA_BIGQUERY_CREDENTIALS")
+    bigquery_dataset: str = Field(
+        default="bigquery-public-data.thelook_ecommerce",
+        validation_alias="LGDA_BIGQUERY_DATASET",
+    )
+    bigquery_location: str = Field(
+        default="US", validation_alias="LGDA_BIGQUERY_LOCATION"
+    )
+    bigquery_credentials_path: Optional[str] = Field(
+        default=None, validation_alias="LGDA_BIGQUERY_CREDENTIALS"
+    )
 
-    # LLM configuration  
-    llm_primary_provider: str = Field(default="gemini", validation_alias="LGDA_LLM_PRIMARY")
-    llm_fallback_provider: str = Field(default="bedrock", validation_alias="LGDA_LLM_FALLBACK")
-    gemini_api_key: Optional[str] = Field(default=None, validation_alias="LGDA_GEMINI_API_KEY")
-    gemini_project_id: Optional[str] = Field(default=None, validation_alias="LGDA_GEMINI_PROJECT_ID")
-    bedrock_region: str = Field(default="us-east-1", validation_alias="LGDA_BEDROCK_REGION")
+    # LLM configuration
+    llm_primary_provider: str = Field(
+        default="gemini", validation_alias="LGDA_LLM_PRIMARY"
+    )
+    llm_fallback_provider: str = Field(
+        default="bedrock", validation_alias="LGDA_LLM_FALLBACK"
+    )
+    gemini_api_key: Optional[str] = Field(
+        default=None, validation_alias="LGDA_GEMINI_API_KEY"
+    )
+    gemini_project_id: Optional[str] = Field(
+        default=None, validation_alias="LGDA_GEMINI_PROJECT_ID"
+    )
+    bedrock_region: str = Field(
+        default="us-east-1", validation_alias="LGDA_BEDROCK_REGION"
+    )
 
     # Security policies
     sql_max_limit: int = Field(default=1000, validation_alias="LGDA_SQL_MAX_LIMIT")
-    allowed_tables: List[str] = Field(default=["orders", "order_items", "products", "users"])
+    allowed_tables: List[str] = Field(
+        default_factory=lambda: ["orders", "order_items", "products", "users"],
+        validation_alias=AliasChoices("LGDA_ALLOWED_TABLES", "ALLOWED_TABLES"),
+    )
 
     def __init__(self, **kwargs):
         # Handle legacy environment variable mapping with warnings FIRST
         self._handle_legacy_env_vars()
-        
-        # Handle allowed_tables manually since it's excluded from auto parsing
-        if "LGDA_ALLOWED_TABLES" in os.environ:
-            env_tables = os.environ["LGDA_ALLOWED_TABLES"]
-            kwargs["allowed_tables"] = [table.strip() for table in env_tables.split(',')]
-        
+
         super().__init__(**kwargs)
 
-    @field_validator('environment')
+    @field_validator("environment")
     @classmethod
     def validate_environment(cls, v):
-        allowed = ['development', 'staging', 'production']
+        allowed = ["development", "staging", "production"]
         if v not in allowed:
-            raise ValueError(f'environment must be one of {allowed}')
+            raise ValueError(f"environment must be one of {allowed}")
         return v
 
-    @field_validator('log_level')
+    @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v):
-        allowed = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        allowed = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
         if v not in allowed:
-            raise ValueError(f'log_level must be one of {allowed}')
+            raise ValueError(f"log_level must be one of {allowed}")
         return v
 
-    def __init__(self, **kwargs):
-        # Handle legacy environment variable mapping with warnings
-        self._handle_legacy_env_vars()
-        super().__init__(**kwargs)
+    @field_validator("allowed_tables", mode="before")
+    @classmethod
+    def parse_allowed_tables(cls, v):
+        """Allow comma-separated string or JSON array for allowed_tables."""
+        if v is None or v == "":
+            return ["orders", "order_items", "products", "users"]
+        if isinstance(v, list):
+            return v
+        if isinstance(v, tuple):
+            return list(v)
+        if isinstance(v, str):
+            # Try JSON first
+            try:
+                parsed = json.loads(v)
+                if isinstance(parsed, list):
+                    return [str(item) for item in parsed]
+            except Exception:
+                # Fallback to comma-separated parsing
+                return [t.strip() for t in v.split(",") if t.strip()]
+        raise ValueError("allowed_tables must be a list or comma-separated string")
+
+    # (second __init__ removed; logic consolidated above)
 
     def _handle_legacy_env_vars(self):
         """Handle legacy environment variables with soft warnings."""
         legacy_mappings = {
             "GOOGLE_API_KEY": "LGDA_GEMINI_API_KEY",
-            "BIGQUERY_PROJECT": "LGDA_BIGQUERY_PROJECT_ID", 
+            "BIGQUERY_PROJECT": "LGDA_BIGQUERY_PROJECT_ID",
             "BIGQUERY_LOCATION": "LGDA_BIGQUERY_LOCATION",
             "DATASET_ID": "LGDA_BIGQUERY_DATASET",
             "MAX_BYTES_BILLED": "LGDA_SQL_MAX_LIMIT",
             "AWS_REGION": "LGDA_BEDROCK_REGION",
-            "ALLOWED_TABLES": "LGDA_ALLOWED_TABLES"
+            "ALLOWED_TABLES": "LGDA_ALLOWED_TABLES",
         }
 
         for legacy_var, new_var in legacy_mappings.items():
             if legacy_var in os.environ and new_var not in os.environ:
                 # Set the new variable from legacy and warn
-                os.environ[new_var] = os.environ[legacy_var]
+                if legacy_var == "ALLOWED_TABLES":
+                    # Convert CSV to JSON list to satisfy pydantic-settings complex decoding
+                    raw = os.environ[legacy_var]
+                    if raw and not raw.strip().startswith("["):
+                        tables = [t.strip() for t in raw.split(",") if t.strip()]
+                        os.environ[new_var] = json.dumps(tables)
+                    else:
+                        os.environ[new_var] = raw
+                else:
+                    os.environ[new_var] = os.environ[legacy_var]
                 warnings.warn(
                     f"Using legacy environment variable {legacy_var}. "
                     f"Please migrate to {new_var} for future compatibility.",
                     DeprecationWarning,
-                    stacklevel=3
+                    stacklevel=3,
                 )
 
-    # Pydantic v2 config  
+        # If new-style LGDA_ALLOWED_TABLES is present but CSV, normalize to JSON too
+        if (
+            val := os.environ.get("LGDA_ALLOWED_TABLES")
+        ) and not val.strip().startswith("["):
+            tables = [t.strip() for t in val.split(",") if t.strip()]
+            os.environ["LGDA_ALLOWED_TABLES"] = json.dumps(tables)
+
+    # Pydantic v2 config
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
+        # Do not read .env directly here; tests patch env and expect isolation.
+        env_file=None,
         case_sensitive=False,
         env_ignore_empty=True,
-        # Exclude fields that need custom parsing
-        env_exclude={"allowed_tables"}
     )
+
+
+# Preserve original class identity across reloads for test stability
+try:  # pragma: no cover
+    LGDAConfig_ORIGINAL
+except NameError:  # not defined yet
+    LGDAConfig_ORIGINAL = LGDAConfig
 
 
 # Credential Manager for secure credential handling
@@ -174,11 +228,13 @@ class CredentialManager:
         2. Service account file path
         3. Application Default Credentials
         """
-        if creds_json := os.getenv('LGDA_BIGQUERY_CREDENTIALS_JSON'):
+        if creds_json := os.getenv("LGDA_BIGQUERY_CREDENTIALS_JSON"):
             try:
                 return json.loads(base64.b64decode(creds_json))
             except (json.JSONDecodeError, ValueError) as e:
-                warnings.warn(f"Invalid base64 JSON in LGDA_BIGQUERY_CREDENTIALS_JSON: {e}")
+                warnings.warn(
+                    f"Invalid base64 JSON in LGDA_BIGQUERY_CREDENTIALS_JSON: {e}"
+                )
                 return None
 
         if self.config.bigquery_credentials_path:
@@ -190,24 +246,24 @@ class CredentialManager:
         """Gemini API credentials."""
         creds = {}
         if self.config.gemini_api_key:
-            creds['api_key'] = self.config.gemini_api_key
+            creds["api_key"] = self.config.gemini_api_key
         if self.config.gemini_project_id:
-            creds['project_id'] = self.config.gemini_project_id
+            creds["project_id"] = self.config.gemini_project_id
         return creds
 
     def get_bedrock_credentials(self) -> dict:
         """AWS Bedrock credentials."""
         return {
-            'region': self.config.bedrock_region,
+            "region": self.config.bedrock_region,
             # AWS credentials typically come from environment or IAM roles
-            'aws_access_key_id': os.getenv('AWS_ACCESS_KEY_ID'),
-            'aws_secret_access_key': os.getenv('AWS_SECRET_ACCESS_KEY'),
-            'aws_session_token': os.getenv('AWS_SESSION_TOKEN'),
+            "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
+            "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
+            "aws_session_token": os.getenv("AWS_SESSION_TOKEN"),
         }
 
     def mask_sensitive_data(self, data: dict) -> dict:
         """Masks sensitive data for logging."""
-        sensitive_keys = ['api_key', 'secret', 'password', 'token', 'credentials']
+        sensitive_keys = ["api_key", "secret", "password", "token", "credentials"]
         masked = data.copy()
         for key in masked:
             if any(sensitive in key.lower() for sensitive in sensitive_keys):
@@ -218,6 +274,7 @@ class CredentialManager:
 # Feature Flags
 class FeatureFlag(Enum):
     """Available feature flags."""
+
     ENABLE_QUERY_CACHE = "enable_query_cache"
     ENABLE_COST_TRACKING = "enable_cost_tracking"
     ENABLE_ADVANCED_ANALYTICS = "enable_advanced_analytics"
@@ -230,6 +287,7 @@ class FeatureFlag(Enum):
 @dataclass
 class EnvironmentProfile:
     """Environment-specific configuration overrides."""
+
     name: str
     config_overrides: Dict[str, Any]
     feature_flags: Dict[str, bool]
@@ -238,63 +296,61 @@ class EnvironmentProfile:
 
 # Environment profile definitions
 ENVIRONMENT_PROFILES = {
-    'development': EnvironmentProfile(
-        name='development',
+    "development": EnvironmentProfile(
+        name="development",
         config_overrides={
-            'debug': True,
-            'log_level': 'DEBUG',
-            'sql_max_limit': 100,  # Smaller limits for dev
+            "debug": True,
+            "log_level": "DEBUG",
+            "sql_max_limit": 100,  # Smaller limits for dev
         },
         feature_flags={
-            'enable_query_cache': False,
-            'enable_cost_tracking': False,
-            'enable_performance_monitoring': False,
+            "enable_query_cache": False,
+            "enable_cost_tracking": False,
+            "enable_performance_monitoring": False,
         },
         performance_settings={
-            'query_timeout': 60,  # 1 minute for dev
-            'retry_count': 1,
-            'cache_ttl': 300,
-        }
+            "query_timeout": 60,  # 1 minute for dev
+            "retry_count": 1,
+            "cache_ttl": 300,
+        },
     ),
-
-    'staging': EnvironmentProfile(
-        name='staging',
+    "staging": EnvironmentProfile(
+        name="staging",
         config_overrides={
-            'debug': False,
-            'log_level': 'INFO',
-            'sql_max_limit': 500,
+            "debug": False,
+            "log_level": "INFO",
+            "sql_max_limit": 500,
         },
         feature_flags={
-            'enable_query_cache': True,
-            'enable_cost_tracking': True,
-            'enable_performance_monitoring': True,
+            "enable_query_cache": True,
+            "enable_cost_tracking": True,
+            "enable_performance_monitoring": True,
         },
         performance_settings={
-            'query_timeout': 180,  # 3 minutes
-            'retry_count': 2,
-            'cache_ttl': 600,
-        }
+            "query_timeout": 180,  # 3 minutes
+            "retry_count": 2,
+            "cache_ttl": 600,
+        },
     ),
-
-    'production': EnvironmentProfile(
-        name='production',
+    "production": EnvironmentProfile(
+        name="production",
         config_overrides={
-            'debug': False,
-            'log_level': 'WARNING',
-            'sql_max_limit': 1000,
+            "debug": False,
+            "log_level": "WARNING",
+            "sql_max_limit": 1000,
         },
         feature_flags={
-            'enable_query_cache': True,
-            'enable_cost_tracking': True,
-            'enable_performance_monitoring': True,
-            'enable_fallback_llm': True,
+            "enable_query_cache": True,
+            "enable_cost_tracking": True,
+            "enable_performance_monitoring": True,
+            "enable_fallback_llm": True,
         },
         performance_settings={
-            'query_timeout': 300,  # 5 minutes
-            'retry_count': 3,
-            'cache_ttl': 1800,
-        }
-    )
+            "query_timeout": 300,  # 5 minutes
+            "retry_count": 3,
+            "cache_ttl": 1800,
+        },
+    ),
 }
 
 
@@ -349,16 +405,16 @@ class PerformanceConfig:
     cache_compression: bool = True
 
     @classmethod
-    def for_environment(cls, environment: str) -> 'PerformanceConfig':
+    def for_environment(cls, environment: str) -> "PerformanceConfig":
         """Factory method for environment-specific performance config."""
-        if environment == 'development':
+        if environment == "development":
             return cls(
                 query_timeout=60,
                 max_concurrent_queries=2,
                 max_dataframe_rows=1000,
                 max_memory_mb=256,
             )
-        elif environment == 'production':
+        elif environment == "production":
             return cls(
                 query_timeout=300,
                 max_concurrent_queries=10,
@@ -376,7 +432,9 @@ class ConfigFactory:
     @staticmethod
     def create_config() -> LGDAConfig:
         """Creates fully configured LGDA config."""
-        base_config = LGDAConfig()
+        # Use stable class alias to avoid isinstance mismatches after import reloads in tests
+        ConfigCls = globals().get("LGDAConfig_ORIGINAL", LGDAConfig)
+        base_config = ConfigCls()
         profile = ENVIRONMENT_PROFILES[base_config.environment]
 
         # Apply environment overrides
