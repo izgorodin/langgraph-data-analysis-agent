@@ -70,68 +70,37 @@ class LGDAConfig(BaseSettings):
     """
 
     # Environment identification  
-    environment: str = Field(default="development")
-    debug: bool = Field(default=False)
-    log_level: str = Field(default="INFO")
+    environment: str = Field(default="development", validation_alias="LGDA_ENVIRONMENT")
+    debug: bool = Field(default=False, validation_alias="LGDA_DEBUG")
+    log_level: str = Field(default="INFO", validation_alias="LGDA_LOG_LEVEL")
 
     # BigQuery configuration
-    bigquery_project_id: str = Field(default="")
+    bigquery_project_id: str = Field(default="", validation_alias="LGDA_BIGQUERY_PROJECT_ID")
     bigquery_dataset: str = Field(
-        default="bigquery-public-data.thelook_ecommerce"
+        default="bigquery-public-data.thelook_ecommerce", validation_alias="LGDA_BIGQUERY_DATASET"
     )
-    bigquery_location: str = Field(default="US")
-    bigquery_credentials_path: Optional[str] = Field(default=None)
+    bigquery_location: str = Field(default="US", validation_alias="LGDA_BIGQUERY_LOCATION")
+    bigquery_credentials_path: Optional[str] = Field(default=None, validation_alias="LGDA_BIGQUERY_CREDENTIALS")
 
     # LLM configuration  
-    llm_primary_provider: str = Field(default="gemini")
-    llm_fallback_provider: str = Field(default="bedrock")
-    gemini_api_key: Optional[str] = Field(default=None)
-    gemini_project_id: Optional[str] = Field(default=None)
-    bedrock_region: str = Field(default="us-east-1")
+    llm_primary_provider: str = Field(default="gemini", validation_alias="LGDA_LLM_PRIMARY")
+    llm_fallback_provider: str = Field(default="bedrock", validation_alias="LGDA_LLM_FALLBACK")
+    gemini_api_key: Optional[str] = Field(default=None, validation_alias="LGDA_GEMINI_API_KEY")
+    gemini_project_id: Optional[str] = Field(default=None, validation_alias="LGDA_GEMINI_PROJECT_ID")
+    bedrock_region: str = Field(default="us-east-1", validation_alias="LGDA_BEDROCK_REGION")
 
     # Security policies
-    sql_max_limit: int = Field(default=1000)
+    sql_max_limit: int = Field(default=1000, validation_alias="LGDA_SQL_MAX_LIMIT")
     allowed_tables: List[str] = Field(default=["orders", "order_items", "products", "users"])
 
     def __init__(self, **kwargs):
-        # Handle allowed_tables parsing from environment first
+        # Handle legacy environment variable mapping with warnings FIRST
+        self._handle_legacy_env_vars()
+        
+        # Handle allowed_tables manually since it's excluded from auto parsing
         if "LGDA_ALLOWED_TABLES" in os.environ:
             env_tables = os.environ["LGDA_ALLOWED_TABLES"]
             kwargs["allowed_tables"] = [table.strip() for table in env_tables.split(',')]
-        
-        # Handle legacy environment variable mapping with warnings
-        self._handle_legacy_env_vars()
-        
-        # Handle LGDA prefixed variables
-        lgda_mappings = {
-            "LGDA_ENVIRONMENT": "environment",
-            "LGDA_DEBUG": "debug", 
-            "LGDA_LOG_LEVEL": "log_level",
-            "LGDA_BIGQUERY_PROJECT_ID": "bigquery_project_id",
-            "LGDA_BIGQUERY_DATASET": "bigquery_dataset",
-            "LGDA_BIGQUERY_LOCATION": "bigquery_location",
-            "LGDA_BIGQUERY_CREDENTIALS": "bigquery_credentials_path",
-            "LGDA_LLM_PRIMARY": "llm_primary_provider",
-            "LGDA_LLM_FALLBACK": "llm_fallback_provider",
-            "LGDA_GEMINI_API_KEY": "gemini_api_key",
-            "LGDA_GEMINI_PROJECT_ID": "gemini_project_id",
-            "LGDA_BEDROCK_REGION": "bedrock_region",
-            "LGDA_SQL_MAX_LIMIT": "sql_max_limit"
-        }
-        
-        for env_var, field_name in lgda_mappings.items():
-            if env_var in os.environ and field_name not in kwargs:
-                value = os.environ[env_var]
-                # Convert boolean strings
-                if field_name == "debug":
-                    value = value.lower() in ("true", "1", "yes", "on")
-                # Convert integer strings
-                elif field_name == "sql_max_limit":
-                    value = int(value)
-                kwargs[field_name] = value
-        
-        # Debug: Print what we're about to pass to super().__init__
-        # print(f"DEBUG: kwargs={kwargs}")
         
         super().__init__(**kwargs)
 
@@ -183,7 +152,10 @@ class LGDAConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False
+        case_sensitive=False,
+        env_ignore_empty=True,
+        # Exclude fields that need custom parsing
+        env_exclude={"allowed_tables"}
     )
 
 
