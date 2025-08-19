@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Optional
 
 from .models import LLMContext, LLMRequest
 from .manager import get_default_manager
+
+logger = logging.getLogger(__name__)
 
 
 def llm_completion(
@@ -35,18 +38,25 @@ def llm_completion(
     
     try:
         # Run async function in sync context
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        # Create new event loop if none exists
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    try:
-        response = loop.run_until_complete(
-            manager.generate_with_fallback(request)
-        )
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # If we're in an async context, we need to create a new thread
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, manager.generate_with_fallback(request))
+                    response = future.result()
+            else:
+                response = loop.run_until_complete(
+                    manager.generate_with_fallback(request)
+                )
+        except RuntimeError:
+            # Create new event loop if none exists
+            response = asyncio.run(manager.generate_with_fallback(request))
+        
         return response.text
-    except Exception:
+    except Exception as e:
+        logger.warning(f"LLM completion failed: {e}")
         # Fallback to empty string for backward compatibility
         return ""
 
@@ -68,16 +78,21 @@ def llm_fallback(prompt: str, system: Optional[str] = None) -> str:
     manager = get_default_manager()
     
     try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    
-    try:
-        # Force fallback provider usage
-        response = loop.run_until_complete(
-            manager.generate_with_fallback_only(request)
-        )
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, manager.generate_with_fallback_only(request))
+                    response = future.result()
+            else:
+                response = loop.run_until_complete(
+                    manager.generate_with_fallback_only(request)
+                )
+        except RuntimeError:
+            response = asyncio.run(manager.generate_with_fallback_only(request))
+        
         return response.text
-    except Exception:
+    except Exception as e:
+        logger.warning(f"LLM fallback failed: {e}")
         return ""

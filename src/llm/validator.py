@@ -95,19 +95,19 @@ class ResponseValidator:
         
         if not plan_json:
             issues.append("No valid JSON plan found")
-            quality_score -= 0.4
+            quality_score -= 0.5  # More severe penalty
         else:
             # Check for required fields
             required_fields = ["task", "tables"]
             for field in required_fields:
                 if field not in plan_json:
                     issues.append(f"Missing required field: {field}")
-                    quality_score -= 0.2
+                    quality_score -= 0.3  # More severe penalty
         
         # Check response length and structure
         if len(response.strip()) < 20:
             issues.append("Response too short")
-            quality_score -= 0.2
+            quality_score -= 0.3
         
         is_valid = quality_score >= self.min_quality_score
         
@@ -121,13 +121,13 @@ class ResponseValidator:
         # Check basic response quality
         if len(response.strip()) < 50:
             issues.append("Analysis response too short")
-            quality_score -= 0.3
+            quality_score -= 0.5  # More severe penalty
         
         # Check for key insights structure
         insight_indicators = ["insight", "finding", "trend", "pattern", "recommendation"]
         if not any(indicator in response.lower() for indicator in insight_indicators):
             issues.append("Response lacks clear insights")
-            quality_score -= 0.2
+            quality_score -= 0.5  # More severe penalty
         
         # Check for factual consistency (basic check)
         if self._contains_obvious_hallucinations(response):
@@ -146,7 +146,7 @@ class ResponseValidator:
         # Basic quality checks
         if len(response.strip()) < 10:
             issues.append("Response too short")
-            quality_score -= 0.3
+            quality_score -= 0.5  # More severe penalty
         
         if self._check_prompt_injection(response):
             issues.append("Potential prompt injection detected")

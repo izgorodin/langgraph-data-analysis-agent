@@ -202,7 +202,7 @@ def sample_llm_responses():
 @pytest.fixture
 def mock_gemini_client(sample_llm_responses):
     """Mock Gemini client with predictable responses."""
-    with patch("src.llm.genai") as mock_genai:
+    with patch("src.llm.providers.gemini.genai") as mock_genai:
         mock_model = Mock()
         mock_response = Mock()
 
