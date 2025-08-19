@@ -84,7 +84,9 @@ class EcommerceDataGenerator:
         for i in range(count):
             category = random.choice(categories)
             cost = round(random.uniform(5.0, 200.0), 2)
-            retail_price = round(cost * random.uniform(1.5, 4.0), 2)  # Realistic markup
+            retail_price = round(
+                cost * random.uniform(self.MIN_MARKUP_MULTIPLIER, self.MAX_MARKUP_MULTIPLIER), 2
+            )  # Realistic markup
 
             product = {
                 "id": i + 1,
