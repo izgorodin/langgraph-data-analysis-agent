@@ -8,6 +8,7 @@ load_dotenv()
 
 @dataclass
 class Settings:
+    # Note: values come from environment variables; no hardcoded secrets used.
     google_api_key: str = os.getenv("GOOGLE_API_KEY", "")
     bq_project: str = os.getenv("BIGQUERY_PROJECT", "")
     bq_location: str = os.getenv("BIGQUERY_LOCATION", "US")
