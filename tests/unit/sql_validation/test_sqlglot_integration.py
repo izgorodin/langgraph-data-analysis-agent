@@ -75,7 +75,7 @@ class TestBigQueryDialectParsing:
             
             # These might fail on table validation since UNNEST doesn't reference our allowed tables
             # That's acceptable - focus on parsing capability
-            if "table" not in result.error.lower():
+            if result.error is None or "table" not in result.error.lower():
                 assert isinstance(result.sql, str)
     
     def test_bigquery_window_functions(self):

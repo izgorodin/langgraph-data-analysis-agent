@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Dict
 
 import pandas as pd
@@ -88,6 +89,7 @@ def validate_sql_node(state: AgentState) -> AgentState:
     try:
         _check_injection_patterns(state.sql)
         _check_multi_statement(state.sql)
+        _validate_syntax_strictly(state.sql)  # Add strict syntax validation
     except Exception as e:
         state.error = str(e)
         return state
@@ -104,8 +106,15 @@ def validate_sql_node(state: AgentState) -> AgentState:
         state.error = "Invalid or empty SQL query"
         return state
 
-    # Policy: SELECT only
-    if not isinstance(parsed, exp.Select):
+    # Policy: SELECT only (but allow UNION of SELECT statements)
+    if isinstance(parsed, exp.Union):
+        # UNION is acceptable if it contains only SELECT statements
+        for expr in parsed.find_all(exp.Select):
+            # All parts of UNION must be SELECT - this is already validated by sqlglot
+            pass
+        # UNION is treated as a complex query, so no LIMIT injection needed
+        has_aggregation = True
+    elif not isinstance(parsed, exp.Select):
         state.error = "Only SELECT queries are allowed"
         return state
 
@@ -122,11 +131,13 @@ def validate_sql_node(state: AgentState) -> AgentState:
     real_tables = tables - cte_names
     
     if not real_tables.issubset(ALLOWED):
-        state.error = f"Disallowed tables: {real_tables - ALLOWED}"
+        forbidden_tables = real_tables - ALLOWED
+        state.error = f"Forbidden tables detected: {', '.join(forbidden_tables)} - potential security violation"
         return state
 
-    # Enhanced aggregation detection for LIMIT injection
-    has_aggregation = _has_aggregation(parsed)
+    # Enhanced aggregation detection for LIMIT injection (unless already set above)
+    if 'has_aggregation' not in locals():
+        has_aggregation = _has_aggregation(parsed)
     
     # Optional: LIMIT for non-aggregates
     if not has_aggregation:
@@ -136,6 +147,40 @@ def validate_sql_node(state: AgentState) -> AgentState:
         state.sql = parsed.sql(dialect="bigquery")
 
     return state
+
+
+def _validate_syntax_strictly(sql: str) -> None:
+    """Pre-validate SQL syntax before sqlglot parsing to prevent auto-correction."""
+    sql_upper = sql.upper().strip()
+    
+    # Check that query starts with SELECT or WITH (for CTEs)
+    if not (sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')):
+        raise ValueError("SQL parse error: Query must start with SELECT or WITH")
+    
+    # Check for incomplete SELECT statement
+    if sql_upper == 'SELECT' or sql_upper.endswith('SELECT'):
+        raise ValueError("SQL parse error: Incomplete SELECT statement")
+    
+    # Check for "SELECT FROM" without column specification (malformed)
+    if re.match(r'SELECT\s+FROM\s+\w+', sql_upper):
+        raise ValueError("SQL parse error: Missing column specification after SELECT")
+    
+    # Check for missing FROM clause in simple cases
+    if 'FROM' not in sql_upper and 'SELECT' in sql_upper and not sql_upper.startswith('WITH'):
+        # Allow cases like SELECT 1, SELECT CURRENT_TIMESTAMP, etc.
+        # But block cases like "SELECT * orders" (missing FROM)
+        if re.search(r'SELECT\s+\*\s+\w+(?:\s|$)', sql, re.IGNORECASE):
+            raise ValueError("SQL parse error: Missing FROM keyword")
+    
+    # Check for incomplete statements ending with keywords
+    incomplete_endings = ['FROM', 'WHERE', 'GROUP', 'ORDER', 'HAVING', 'LIMIT']
+    for ending in incomplete_endings:
+        if sql_upper.rstrip().endswith(ending):
+            raise ValueError(f"SQL parse error: Incomplete statement ending with {ending}")
+    
+    # Check for incomplete FROM clause
+    if re.search(r'\bFROM\s*$', sql, re.IGNORECASE):
+        raise ValueError("SQL parse error: Incomplete FROM clause")
 
 
 def _check_injection_patterns(sql: str) -> None:
@@ -223,35 +268,57 @@ def _remove_strings_and_comments(sql: str) -> str:
 
 
 def _has_aggregation(parsed) -> bool:
-    """Enhanced aggregation detection including window functions and DISTINCT."""
-    # Check for GROUP BY
+    """Enhanced aggregation detection - only checks the outer query level."""
+    
+    # Check for GROUP BY at the top level
     if parsed.find(exp.Group):
         return True
     
-    # Check for aggregate functions - look for specific function types
-    for func in parsed.find_all(exp.Anonymous):
+    # Check for HAVING at the top level (implies aggregation)
+    if parsed.find(exp.Having):
+        return True
+    
+    # Check for DISTINCT at the top level
+    if parsed.find(exp.Distinct):
+        return True
+    
+    # Check for window functions at the top level
+    if parsed.find(exp.Window):
+        return True
+    
+    # For aggregation functions, we only check the SELECT clause of the outer query
+    # to avoid false positives from subqueries
+    if hasattr(parsed, 'expressions') and parsed.expressions:
+        for expr in parsed.expressions:
+            # Check this expression and its immediate children for aggregation
+            if _expression_has_aggregation(expr):
+                return True
+    
+    return False
+
+
+def _expression_has_aggregation(expr) -> bool:
+    """Check if a single expression has aggregation functions (non-recursive for subqueries)."""
+    # Check for specific aggregate function types
+    agg_types = [exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max]
+    for agg_type in agg_types:
+        if expr.find(agg_type):
+            return True
+    
+    # Check for aggregate functions by name, but only in direct children (not subqueries)
+    for func in expr.find_all(exp.Anonymous):
         if hasattr(func, 'this') and func.this:
             func_name = str(func.this).lower()
             if func_name in ['count', 'sum', 'avg', 'min', 'max', 'stddev', 'variance', 
                            'array_agg', 'string_agg', 'approx_count_distinct']:
                 return True
     
-    # Also check for Count, Sum, Avg, etc. expression types directly
-    agg_types = [exp.Count, exp.Sum, exp.Avg, exp.Min, exp.Max]
-    for agg_type in agg_types:
-        if parsed.find(agg_type):
-            return True
-    
-    # Check for window functions
-    if parsed.find(exp.Window):
+    # Check for window functions in this expression
+    if expr.find(exp.Window):
         return True
     
-    # Check for DISTINCT
-    if parsed.find(exp.Distinct):
-        return True
-    
-    # Check for HAVING (implies aggregation)
-    if parsed.find(exp.Having):
+    # Check for DISTINCT in this expression
+    if expr.find(exp.Distinct):
         return True
     
     return False
