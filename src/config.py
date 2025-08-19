@@ -207,9 +207,7 @@ class LGDAConfig(BaseSettings):
 
 
 # Preserve original class identity across reloads for test stability
-try:  # pragma: no cover
-    LGDAConfig_ORIGINAL
-except NameError:  # not defined yet
+if "LGDAConfig_ORIGINAL" not in globals():
     LGDAConfig_ORIGINAL = LGDAConfig
 
 

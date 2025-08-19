@@ -5,7 +5,6 @@ while delegating to the new LLM provider infrastructure.
 """
 
 from __future__ import annotations
-
 from typing import Optional
 
 # Expose underlying client for legacy tests that patch src.llm.genai
