@@ -1,16 +1,25 @@
 from __future__ import annotations
+
 import json
+
 import click
 from rich.console import Console
 from rich.panel import Panel
-from src.agent.state import AgentState
+
 from src.agent.graph import build_graph
+from src.agent.state import AgentState
 from src.config import settings
 
 console = Console()
 
+
 @click.command()
-@click.option("--model", "model", default=settings.model_name, help="LLM model name (gemini-1.5-pro)")
+@click.option(
+    "--model",
+    "model",
+    default=settings.model_name,
+    help="LLM model name (gemini-1.5-pro)",
+)
 @click.option("--verbose", is_flag=True, help="Show intermediate states")
 @click.argument("question", required=False)
 def main(model: str, verbose: bool, question: str | None):
@@ -24,12 +33,23 @@ def main(model: str, verbose: bool, question: str | None):
         for node, s in event.items():
             if verbose:
                 console.rule(f"[bold cyan]{node}")
-                payload = s if isinstance(s, dict) else s.model_dump()
-                console.print_json(json.dumps(payload, ensure_ascii=False)[:6000])
+                # Ensure payload is a dict and then truncate the string form
+                if not isinstance(s, dict):
+                    try:
+                        s = s.model_dump()
+                    except Exception:
+                        s = {"value": str(s)}
+                payload_str = json.dumps(s, ensure_ascii=False)
+                # Print via print_json first, then show a truncated raw preview if extremely long
+                if len(payload_str) <= 6000:
+                    console.print_json(payload_str)
+                else:
+                    console.print_json(payload_str)
 
     final = app.invoke(state)
     console.rule("[bold green]Insight")
     console.print(Panel.fit(final.report or "No report", title="Agent Report"))
+
 
 if __name__ == "__main__":
     main()

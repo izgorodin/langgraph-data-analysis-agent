@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import google.generativeai as genai
 import pandas as pd
@@ -208,26 +208,47 @@ def mock_gemini_client(sample_llm_responses):
 
         def mock_generate_content(prompt):
             # Determine response type based on prompt content
-            if "plan" in prompt.lower() or "schema" in prompt.lower():
-                mock_response.text = sample_llm_responses["plan"]
-            elif "sql" in prompt.lower() or "select" in prompt.lower():
+            # If test explicitly set a return_value, respect it
+            gen_mock = mock_model.generate_content
+            try:
+                forced = getattr(gen_mock, "return_value", None)
+                # Only respect forced return if it looks explicitly set (has a 'text' attribute)
+                if forced is not None and hasattr(forced, "text"):
+                    return forced
+            except Exception:
+                pass
+            # Prefer SQL classification if prompt includes SQL keywords
+            if "sql" in prompt.lower() or "select" in prompt.lower():
                 mock_response.text = sample_llm_responses["sql"]
+            elif "plan" in prompt.lower() or "schema" in prompt.lower():
+                mock_response.text = sample_llm_responses["plan"]
             else:
                 mock_response.text = sample_llm_responses["report"]
             return mock_response
 
-        mock_model.generate_content = mock_generate_content
+        # Use a Mock for generate_content so tests can assert call counts
+        mock_model.generate_content = Mock(side_effect=mock_generate_content)
         mock_genai.GenerativeModel.return_value = mock_model
         mock_genai.configure = Mock()
 
         yield mock_genai
 
 
-@pytest.fixture  
+# Ensure mock_gemini_client is available in test_llm_client module even if not requested
+@pytest.fixture(autouse=True)
+def _expose_mock_gemini_in_llm_tests(request, mock_gemini_client):
+    import sys
+
+    module = request.node.module
+    if module.__name__.endswith("test_llm_client"):
+        setattr(sys.modules[module.__name__], "mock_gemini_client", mock_gemini_client)
+
+
+@pytest.fixture
 def mock_llm_manager(sample_llm_responses):
     """Mock LLM manager for backward compatibility tests."""
-    from src.llm.models import LLMResponse, LLMProvider, LLMContext
-    
+    from src.llm.models import LLMContext, LLMProvider, LLMResponse
+
     # Create a simple function that returns predictable responses
     def mock_completion(prompt, system=None, model=None):
         # Determine response type based on prompt content
@@ -238,7 +259,7 @@ def mock_llm_manager(sample_llm_responses):
             return sample_llm_responses["sql"]
         else:
             return sample_llm_responses["report"]
-    
+
     # Patch the llm_completion function directly from src.llm module
     with patch("src.llm.llm_completion", side_effect=mock_completion):
         with patch("src.llm.llm_fallback", side_effect=mock_completion):
