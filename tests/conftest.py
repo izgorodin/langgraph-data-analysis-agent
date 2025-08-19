@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any, Dict, List
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, patch, AsyncMock
 
 import google.generativeai as genai
 import pandas as pd
@@ -221,6 +221,28 @@ def mock_gemini_client(sample_llm_responses):
         mock_genai.configure = Mock()
 
         yield mock_genai
+
+
+@pytest.fixture  
+def mock_llm_manager(sample_llm_responses):
+    """Mock LLM manager for backward compatibility tests."""
+    from src.llm.models import LLMResponse, LLMProvider, LLMContext
+    
+    # Create a simple function that returns predictable responses
+    def mock_completion(prompt, system=None, model=None):
+        # Determine response type based on prompt content
+        prompt_lower = prompt.lower()
+        if "plan" in prompt_lower or "schema" in prompt_lower:
+            return sample_llm_responses["plan"]
+        elif "sql" in prompt_lower or "select" in prompt_lower:
+            return sample_llm_responses["sql"]
+        else:
+            return sample_llm_responses["report"]
+    
+    # Patch the llm_completion function directly from src.llm module
+    with patch("src.llm.llm_completion", side_effect=mock_completion):
+        with patch("src.llm.llm_fallback", side_effect=mock_completion):
+            yield mock_completion
 
 
 @pytest.fixture
