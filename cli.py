@@ -29,7 +29,14 @@ def main(model: str, verbose: bool, question: str | None):
 
     final = app.invoke(state)
     console.rule("[bold green]Insight")
-    console.print(Panel.fit(final.report or "No report", title="Agent Report"))
+    
+    # Handle both AgentState objects and dict responses from LangGraph
+    if isinstance(final, dict):
+        report = final.get("report", "No report")
+    else:
+        report = final.report or "No report"
+    
+    console.print(Panel.fit(report, title="Agent Report"))
 
 if __name__ == "__main__":
     main()

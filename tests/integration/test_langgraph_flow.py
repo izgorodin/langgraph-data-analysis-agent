@@ -40,12 +40,13 @@ class TestLangGraphFlow:
         final_state = app.invoke(initial_state)
 
         # Verify final state has all expected fields populated
-        assert final_state.question == initial_state.question
-        assert final_state.plan_json is not None
-        assert final_state.sql is not None
-        assert final_state.df_summary is not None
-        assert final_state.report is not None
-        assert final_state.error is None
+        # Note: LangGraph returns dict, not AgentState object
+        assert final_state["question"] == initial_state.question
+        assert final_state["plan_json"] is not None
+        assert final_state["sql"] is not None
+        assert final_state.get("df_summary") is not None
+        assert final_state["report"] is not None
+        assert final_state["error"] is None
 
     def test_graph_streaming_execution(self, mock_bigquery_client, mock_gemini_client):
         """Test streaming execution through graph nodes."""
@@ -99,9 +100,9 @@ class TestLangGraphFlow:
             final_state = app.invoke(initial_state)
 
             # Should stop at validation and set error
-            assert final_state.error is not None
-            assert "SQL parse error" in final_state.error
-            assert final_state.df_summary is None  # Should not reach execution
+            assert final_state["error"] is not None
+            assert "SQL parse error" in final_state["error"]
+            assert final_state["df_summary"] is None  # Should not reach execution
 
     def test_graph_conditional_edge_on_error(
         self, mock_bigquery_client, mock_gemini_client
@@ -244,10 +245,10 @@ class TestLangGraphFlow:
         final_state = app.invoke(initial_state)
 
         # Original question should be preserved
-        assert final_state.question == initial_state.question
+        assert final_state["question"] == initial_state.question
 
         # History should be maintained and potentially expanded
-        assert len(final_state.history) >= len(initial_state.history)
+        assert len(final_state["history"]) >= len(initial_state.history)
 
     def test_graph_parallel_execution_safety(
         self, mock_bigquery_client, mock_gemini_client
@@ -284,7 +285,7 @@ class TestLangGraphFlow:
         assert len(results) == 3
 
         # Each result should be independent
-        questions = [result.question for result in results]
+        questions = [result["question"] for result in results]
         assert len(set(questions)) == 3  # All unique
 
     def test_graph_memory_efficiency(self, mock_bigquery_client, mock_gemini_client):
@@ -297,7 +298,7 @@ class TestLangGraphFlow:
             result = app.invoke(state)
 
             # Each result should be independent
-            assert result.question == f"Memory test {i}"
+            assert result["question"] == f"Memory test {i}"
 
     def test_graph_configuration_dependency(self, mock_env_vars):
         """Test that graph uses configuration properly."""
@@ -324,8 +325,8 @@ class TestLangGraphFlow:
             final_state = app.invoke(initial_state)
 
             # Error should be captured in final state
-            assert final_state.error is not None
-            assert "BigQuery connection failed" in final_state.error
+            assert final_state["error"] is not None
+            assert "BigQuery connection failed" in final_state["error"]
 
     def test_graph_with_custom_state(self, mock_bigquery_client, mock_gemini_client):
         """Test graph execution with pre-populated state."""
@@ -341,9 +342,9 @@ class TestLangGraphFlow:
         final_state = app.invoke(custom_state)
 
         # Should preserve initial data and add new data
-        assert final_state.question == custom_state.question
-        assert final_state.plan_json == custom_state.plan_json
-        assert len(final_state.history) >= len(custom_state.history)
+        assert final_state["question"] == custom_state.question
+        assert final_state["plan_json"] == custom_state.plan_json
+        assert len(final_state["history"]) >= len(custom_state.history)
 
     def test_graph_entry_point(self, mock_bigquery_client, mock_gemini_client):
         """Test that graph starts at the correct entry point."""
@@ -381,4 +382,4 @@ class TestLangGraphFlow:
             final_state = app.invoke(error_state)
 
             # Should terminate with error
-            assert final_state.error is not None
+            assert final_state["error"] is not None
