@@ -1,25 +1,15 @@
+"""Backward compatibility module for existing LLM functions.
+
+This module maintains the original llm_completion and llm_fallback functions
+while delegating to the new LLM provider infrastructure.
+"""
+
 from __future__ import annotations
 
 from typing import Optional
 
-import google.generativeai as genai
+# Import from new LLM infrastructure
+from .llm import llm_completion, llm_fallback
 
-from .config import settings
-
-# Configure Gemini
-if settings.google_api_key:
-    genai.configure(api_key=settings.google_api_key)
-
-
-def llm_completion(
-    prompt: str, system: Optional[str] = None, model: Optional[str] = None
-) -> str:
-    model = model or settings.model_name
-    contents = prompt if system is None else f"System: {system}\n\nUser: {prompt}"
-    resp = genai.GenerativeModel(model).generate_content(contents)
-    return resp.text or ""
-
-
-def llm_fallback(prompt: str, system: Optional[str] = None) -> str:
-    # Placeholder for Bedrock if needed later
-    return ""
+# Re-export for backward compatibility
+__all__ = ["llm_completion", "llm_fallback"]
