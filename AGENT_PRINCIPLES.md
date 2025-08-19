@@ -1,6 +1,6 @@
 # SmartKeys Agent Principles (Condensed)
 
-See `AGENT_MEMORANDUM.md` for full context.
+See `LGDA_MEMORANDUM.md` for full context.
 
 1. Modularity
 2. Testability

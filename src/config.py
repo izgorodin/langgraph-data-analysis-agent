@@ -4,13 +4,13 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Settings:
+
     google_api_key: str = field(default="")
     bq_project: str = field(default="")
     bq_location: str = field(default="US")
     dataset_id: str = field(default="bigquery-public-data.thelook_ecommerce")
     allowed_tables: tuple[str, ...] = field(
         default_factory=lambda: ("orders", "order_items", "products", "users")
-    )
     max_bytes_billed: int = field(default=100000000)
     model_name: str = field(default="gemini-1.5-pro")
     aws_region: str = field(default="eu-west-1")
