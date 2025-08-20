@@ -174,6 +174,8 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             llm_integration = get_llm_integration()
             sql = llm_integration.generate_sql_sync(state.plan_json, list(ALLOWED))
             state.sql = sql
+            # Clear error state on successful generation
+            state.error = None
             return state
         except Exception:  # noqa: BLE001
             # Fallback to original implementation
@@ -182,6 +184,8 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
     # Use unified retry-enabled SQL generation
     try:
         state.sql = _generate_sql_with_retry(state)
+        # Clear error state on successful generation
+        state.error = None
         return state
     except Exception as e:
         # For compatibility with existing error handling
@@ -258,6 +262,10 @@ def validate_sql_node(state: AgentState) -> AgentState:
             parsed.set("limit", exp.Limit(this=exp.Literal.number(1000)))
         state.sql = parsed.sql(dialect="bigquery")
 
+    # Clear any previous validation errors since validation passed
+    state.error = None
+    # Don't clear last_error here as it might be needed for retry context
+    
     return state
 
 
@@ -484,6 +492,10 @@ def execute_sql_node(state: AgentState) -> AgentState:
         "describe": json.loads(df_for_summary.describe(include="all").to_json()),
     }
     state.df_summary = summary
+    
+    # Clear error state on successful execution
+    state.error = None
+    
     return state
 
 
