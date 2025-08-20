@@ -119,6 +119,43 @@ class SecurityConfig(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LGDA_SECURITY_", case_sensitive=False)
 
 
+class RetryConfig(BaseSettings):
+    """Centralized retry configuration for all LGDA components."""
+
+    # Global retry control
+    enable_unified_retry: bool = Field(default=True)
+
+    # SQL generation retry configuration
+    sql_generation_max_attempts: int = Field(default=3, ge=1, le=10)
+    sql_generation_base_delay: float = Field(default=1.0, ge=0.1, le=60.0)
+    sql_generation_max_delay: float = Field(default=8.0, ge=1.0, le=300.0)
+    sql_generation_backoff_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+
+    # BigQuery transient retry configuration
+    bigquery_transient_max_attempts: int = Field(default=5, ge=1, le=20)
+    bigquery_transient_base_delay: float = Field(default=0.5, ge=0.1, le=60.0)
+    bigquery_transient_max_delay: float = Field(default=30.0, ge=1.0, le=300.0)
+    bigquery_transient_backoff_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+
+    # LLM timeout retry configuration
+    llm_timeout_max_attempts: int = Field(default=2, ge=1, le=10)
+    llm_timeout_base_delay: float = Field(default=2.0, ge=0.1, le=60.0)
+    llm_timeout_max_delay: float = Field(default=10.0, ge=1.0, le=300.0)
+    llm_timeout_backoff_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+
+    # Rate limit retry configuration
+    rate_limit_max_attempts: int = Field(default=3, ge=1, le=10)
+    rate_limit_base_delay: float = Field(default=5.0, ge=0.1, le=60.0)
+    rate_limit_max_delay: float = Field(default=60.0, ge=1.0, le=300.0)
+    rate_limit_backoff_multiplier: float = Field(default=2.0, ge=1.0, le=5.0)
+
+    # General retry settings
+    enable_jitter: bool = Field(default=True)
+    enable_context_tracking: bool = Field(default=True)
+
+    model_config = SettingsConfigDict(env_prefix="LGDA_RETRY_", case_sensitive=False)
+
+
 class PerformanceConfig(BaseSettings):
     """Centralized performance configuration."""
 
@@ -147,6 +184,7 @@ class UnifiedConfig(BaseModel):
     bigquery: BigQueryConfig = Field(default_factory=BigQueryConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     performance: PerformanceConfig = Field(default_factory=PerformanceConfig)
+    retry: RetryConfig = Field(default_factory=RetryConfig)
 
     # Environment and debug settings
     environment: str = Field(default="development")
@@ -177,6 +215,9 @@ class UnifiedConfig(BaseModel):
             config.performance.enable_query_cache = False
             config.llm.request_timeout = 60
             config.bigquery.query_timeout = 60
+            # More retries in development for debugging
+            config.retry.sql_generation_max_attempts = 5
+            config.retry.bigquery_transient_max_attempts = 3
 
         elif environment == "production":
             config.debug = False
@@ -186,6 +227,9 @@ class UnifiedConfig(BaseModel):
             config.performance.enable_query_cache = True
             config.llm.request_timeout = 30
             config.bigquery.query_timeout = 300
+            # Conservative retries in production
+            config.retry.sql_generation_max_attempts = 3
+            config.retry.bigquery_transient_max_attempts = 5
 
         return config
 
@@ -215,3 +259,8 @@ def get_security_config() -> SecurityConfig:
 def get_performance_config() -> PerformanceConfig:
     """Get Performance configuration."""
     return get_unified_config().performance
+
+
+def get_retry_config() -> RetryConfig:
+    """Get Retry configuration."""
+    return get_unified_config().retry
