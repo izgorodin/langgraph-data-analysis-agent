@@ -196,7 +196,7 @@ class UnifiedConfig(BaseModel):
         return config
 
 
-@lru_cache()
+@lru_cache(maxsize=1)
 def get_unified_config() -> UnifiedConfig:
     """Get cached unified configuration instance."""
     return UnifiedConfig()
