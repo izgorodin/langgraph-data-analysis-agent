@@ -44,7 +44,10 @@ class LGDAMetrics:
         else:
             self.enabled = enabled
             
-        self.enabled = self.enabled and PROMETHEUS_AVAILABLE
+        # Only check PROMETHEUS_AVAILABLE if we want to be enabled
+        if self.enabled and not PROMETHEUS_AVAILABLE:
+            logger.warning("Metrics requested but prometheus_client not available")
+            self.enabled = False
         
         if not self.enabled:
             logger.info("LGDA metrics collection disabled")

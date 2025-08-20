@@ -16,6 +16,7 @@ from .health import HealthMonitor
 from .logging import LGDALogger
 from .metrics import LGDAMetrics
 from .tracing import LGDATracer
+from .manager import ObservabilityManager, get_observability_manager, setup_observability, shutdown_observability
 
 __all__ = [
     "LGDAMetrics",
@@ -23,4 +24,8 @@ __all__ = [
     "LGDATracer",
     "HealthMonitor",
     "BusinessMetrics",
+    "ObservabilityManager",
+    "get_observability_manager",
+    "setup_observability", 
+    "shutdown_observability",
 ]

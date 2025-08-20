@@ -113,6 +113,43 @@ class LGDAConfig(BaseSettings):
         validation_alias=AliasChoices("LGDA_ALLOWED_TABLES", "ALLOWED_TABLES"),
     )
 
+    # Observability configuration
+    observability_enabled: bool = Field(
+        default=True, validation_alias="LGDA_OBSERVABILITY_ENABLED"
+    )
+    disable_observability: bool = Field(
+        default=False, validation_alias="LGDA_DISABLE_OBSERVABILITY"
+    )
+    metrics_enabled: bool = Field(
+        default=True, validation_alias="LGDA_METRICS_ENABLED"
+    )
+    logging_enabled: bool = Field(
+        default=True, validation_alias="LGDA_LOGGING_ENABLED"
+    )
+    tracing_enabled: bool = Field(
+        default=True, validation_alias="LGDA_TRACING_ENABLED"
+    )
+    health_monitoring_enabled: bool = Field(
+        default=True, validation_alias="LGDA_HEALTH_MONITORING_ENABLED"
+    )
+    business_metrics_enabled: bool = Field(
+        default=True, validation_alias="LGDA_BUSINESS_METRICS_ENABLED"
+    )
+    
+    # Observability endpoints and configuration
+    prometheus_endpoint: Optional[str] = Field(
+        default=None, validation_alias="LGDA_PROMETHEUS_ENDPOINT"
+    )
+    jaeger_endpoint: Optional[str] = Field(
+        default=None, validation_alias="LGDA_JAEGER_ENDPOINT"
+    )
+    health_check_interval: int = Field(
+        default=30, validation_alias="LGDA_HEALTH_CHECK_INTERVAL"
+    )
+    metrics_retention_hours: int = Field(
+        default=24, validation_alias="LGDA_METRICS_RETENTION_HOURS"
+    )
+
     def __init__(self, **kwargs):
         # Handle legacy environment variable mapping with warnings FIRST
         self._handle_legacy_env_vars()
@@ -155,6 +192,25 @@ class LGDAConfig(BaseSettings):
                 # Fallback to comma-separated parsing
                 return [t.strip() for t in v.split(",") if t.strip()]
         raise ValueError("allowed_tables must be a list or comma-separated string")
+
+    @property
+    def is_observability_enabled(self) -> bool:
+        """Check if observability is enabled overall."""
+        # Use getattr to safely get disable_observability since it might be extra field
+        disable_flag = getattr(self, 'disable_observability', False)
+        return self.observability_enabled and not disable_flag
+
+    @property
+    def effective_observability_config(self) -> Dict[str, bool]:
+        """Get effective observability configuration."""
+        base_enabled = self.is_observability_enabled
+        return {
+            "metrics": base_enabled and getattr(self, 'metrics_enabled', True),
+            "logging": base_enabled and getattr(self, 'logging_enabled', True),
+            "tracing": base_enabled and getattr(self, 'tracing_enabled', True),
+            "health_monitoring": base_enabled and getattr(self, 'health_monitoring_enabled', True),
+            "business_metrics": base_enabled and getattr(self, 'business_metrics_enabled', True),
+        }
 
     # (second __init__ removed; logic consolidated above)
 
@@ -203,6 +259,7 @@ class LGDAConfig(BaseSettings):
         env_file=None,
         case_sensitive=False,
         env_ignore_empty=True,
+        extra='allow',  # Allow extra fields for extensibility
     )
 
 
