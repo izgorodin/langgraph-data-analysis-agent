@@ -7,24 +7,32 @@ The instrumented nodes can be used as drop-in replacements for the original
 nodes, with observability being optional and configurable.
 """
 
-import time
-from typing import Any, Dict, Optional
 import logging
+import time
 from functools import wraps
+from typing import Any, Dict, Optional
 
-from ..agent.nodes import plan, synthesize_sql, validate_sql, execute_sql, analyze_df, report
+from ..agent.nodes import (
+    analyze_df,
+    execute_sql,
+    plan,
+    report,
+    synthesize_sql,
+    validate_sql,
+)
 from ..agent.state import AgentState
-from .metrics import get_metrics, MetricsContext
-from .logging import get_logger, TimedOperation, set_request_context
-from .tracing import get_tracer
-from .business_metrics import get_business_metrics, QueryComplexity
+from .business_metrics import QueryComplexity, get_business_metrics
 from .health import get_health_monitor
+from .logging import TimedOperation, get_logger, set_request_context
+from .metrics import MetricsContext, get_metrics
+from .tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
 
 def instrument_node(node_name: str):
     """Decorator to instrument pipeline nodes with observability."""
+
     def decorator(func):
         @wraps(func)
         async def wrapper(state: AgentState) -> AgentState:
@@ -33,50 +41,53 @@ def instrument_node(node_name: str):
             lgda_logger = get_logger()
             tracer = get_tracer()
             business_metrics = get_business_metrics()
-            
+
             # Start tracing
-            with tracer.trace_stage_execution(node_name, question=getattr(state, 'question', '')) as span:
+            with tracer.trace_stage_execution(
+                node_name, question=getattr(state, "question", "")
+            ) as span:
                 # Start timing
                 start_time = time.time()
-                
+
                 # Set up logging context
                 with set_request_context(
-                    request_id=getattr(state, 'request_id', None),
-                    user_id=getattr(state, 'user_id', None),
-                    session_id=getattr(state, 'session_id', None)
+                    request_id=getattr(state, "request_id", None),
+                    user_id=getattr(state, "user_id", None),
+                    session_id=getattr(state, "session_id", None),
                 ):
                     try:
                         # Execute the original node function
                         result = await func(state)
-                        
+
                         # Calculate metrics
                         duration = time.time() - start_time
-                        
+
                         # Record success metrics
                         metrics.record_pipeline_stage(node_name, duration)
                         business_metrics.track_pipeline_performance(
                             node_name, duration, True
                         )
-                        
+
                         # Log successful execution
                         lgda_logger.log_pipeline_stage(
-                            node_name, duration, 
+                            node_name,
+                            duration,
                             input_size=_estimate_state_size(state),
                             output_size=_estimate_state_size(result),
-                            success=True
+                            success=True,
                         )
-                        
+
                         # Add span attributes
                         span.set_attribute("success", True)
                         span.set_attribute("output_size", _estimate_state_size(result))
-                        
+
                         return result
-                        
+
                     except Exception as e:
                         # Calculate metrics for failure
                         duration = time.time() - start_time
                         error_type = type(e).__name__
-                        
+
                         # Record error metrics
                         metrics.record_pipeline_stage(node_name, duration, error_type)
                         business_metrics.track_pipeline_performance(
@@ -85,24 +96,26 @@ def instrument_node(node_name: str):
                         business_metrics.track_error_patterns(
                             error_type, node_name, False
                         )
-                        
+
                         # Log error
                         lgda_logger.log_pipeline_stage(
-                            node_name, duration,
+                            node_name,
+                            duration,
                             input_size=_estimate_state_size(state),
                             success=False,
-                            error=str(e)
+                            error=str(e),
                         )
-                        
+
                         # Add span error info
                         span.record_exception(e)
                         span.set_attribute("success", False)
                         span.set_attribute("error_type", error_type)
-                        
+
                         # Re-raise the exception
                         raise
-                        
+
         return wrapper
+
     return decorator
 
 
@@ -120,7 +133,7 @@ def _determine_query_complexity(question: str, sql: str = "") -> QueryComplexity
     # Simple heuristic based on question length and SQL complexity
     question_length = len(question)
     sql_length = len(sql)
-    
+
     # Count complexity indicators
     complexity_indicators = 0
     if "join" in sql.lower():
@@ -133,7 +146,7 @@ def _determine_query_complexity(question: str, sql: str = "") -> QueryComplexity
         complexity_indicators += 1
     if "window" in sql.lower() or "over(" in sql.lower():
         complexity_indicators += 1
-    
+
     # Determine complexity
     if question_length < 50 and complexity_indicators == 0:
         return QueryComplexity.SIMPLE
@@ -151,25 +164,23 @@ async def instrumented_plan(state: AgentState) -> AgentState:
     """Instrumented planning node."""
     lgda_logger = get_logger()
     business_metrics = get_business_metrics()
-    
+
     # Log the incoming question
     lgda_logger.log_audit_trail(
-        "plan_request", 
-        "question",
-        details={"question_preview": state.question[:100]}
+        "plan_request", "question", details={"question_preview": state.question[:100]}
     )
-    
+
     # Determine complexity
     complexity = _determine_query_complexity(state.question)
-    
+
     # Track user patterns
     business_metrics.track_user_patterns(
         question_category="analysis",  # Could be enhanced with NLP categorization
         complexity=complexity.value,
-        user_id=getattr(state, 'user_id', None),
-        session_id=getattr(state, 'session_id', None)
+        user_id=getattr(state, "user_id", None),
+        session_id=getattr(state, "session_id", None),
     )
-    
+
     return await plan(state)
 
 
@@ -177,31 +188,31 @@ async def instrumented_plan(state: AgentState) -> AgentState:
 async def instrumented_synthesize_sql(state: AgentState) -> AgentState:
     """Instrumented SQL synthesis node."""
     lgda_logger = get_logger()
-    
+
     # Log LLM request details
     lgda_logger.log_llm_request(
         provider="gemini",  # Could be dynamic based on config
         model="gemini-1.5-pro",  # Could be dynamic based on config
-        prompt_length=len(state.plan_json.get("task", "")) if state.plan_json else 0
+        prompt_length=len(state.plan_json.get("task", "")) if state.plan_json else 0,
     )
-    
+
     return await synthesize_sql(state)
 
 
-@instrument_node("validate_sql") 
+@instrument_node("validate_sql")
 async def instrumented_validate_sql(state: AgentState) -> AgentState:
     """Instrumented SQL validation node."""
     lgda_logger = get_logger()
-    
+
     # Log security validation
     lgda_logger.log_security_event(
         "sql_validation",
         details={
             "sql_length": len(state.sql) if state.sql else 0,
-            "has_limit": "limit" in (state.sql or "").lower()
-        }
+            "has_limit": "limit" in (state.sql or "").lower(),
+        },
     )
-    
+
     return await validate_sql(state)
 
 
@@ -212,23 +223,22 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
     lgda_logger = get_logger()
     business_metrics = get_business_metrics()
     tracer = get_tracer()
-    
+
     # Track BigQuery operation
     with tracer.trace_bigquery_operation(
-        "execute_query",
-        sql_length=len(state.sql) if state.sql else 0
+        "execute_query", sql_length=len(state.sql) if state.sql else 0
     ) as span:
-        
+
         result = await execute_sql(state)
-        
+
         # Extract execution details from result
         success = not bool(state.error)
-        bytes_processed = getattr(state, 'bytes_processed', None)
-        execution_time = getattr(state, 'execution_time', None)
-        
+        bytes_processed = getattr(state, "bytes_processed", None)
+        execution_time = getattr(state, "execution_time", None)
+
         # Record BigQuery metrics
         metrics.record_query_execution(success, bytes_processed)
-        
+
         # Log query execution
         lgda_logger.log_query_execution(
             question=state.question,
@@ -237,9 +247,11 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
             success=success,
             error=state.error,
             bytes_processed=bytes_processed,
-            row_count=len(state.df) if hasattr(state, 'df') and state.df is not None else 0
+            row_count=(
+                len(state.df) if hasattr(state, "df") and state.df is not None else 0
+            ),
         )
-        
+
         # Track business metrics
         complexity = _determine_query_complexity(state.question, state.sql or "")
         business_metrics.track_query_success_rate(
@@ -247,13 +259,16 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
             question=state.question,
             complexity=complexity,
             execution_time=execution_time,
-            error_type=type(state.error).__name__ if state.error else None
+            error_type=type(state.error).__name__ if state.error else None,
         )
-        
+
         # Update span with execution details
         span.set_attribute("bytes_processed", bytes_processed or 0)
-        span.set_attribute("row_count", len(state.df) if hasattr(state, 'df') and state.df is not None else 0)
-        
+        span.set_attribute(
+            "row_count",
+            len(state.df) if hasattr(state, "df") and state.df is not None else 0,
+        )
+
         return result
 
 
@@ -261,19 +276,19 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
 async def instrumented_analyze_df(state: AgentState) -> AgentState:
     """Instrumented data analysis node."""
     lgda_logger = get_logger()
-    
+
     # Log data analysis details
-    if hasattr(state, 'df') and state.df is not None:
+    if hasattr(state, "df") and state.df is not None:
         lgda_logger.log_performance_metric(
             operation="dataframe_analysis",
             duration=0,  # Will be updated by the timing wrapper
             resource_usage={
                 "dataframe_rows": len(state.df),
                 "dataframe_columns": len(state.df.columns),
-                "memory_usage_mb": state.df.memory_usage(deep=True).sum() / 1024 / 1024
-            }
+                "memory_usage_mb": state.df.memory_usage(deep=True).sum() / 1024 / 1024,
+            },
         )
-    
+
     return await analyze_df(state)
 
 
@@ -283,29 +298,31 @@ async def instrumented_report(state: AgentState) -> AgentState:
     metrics = get_metrics()
     lgda_logger = get_logger()
     business_metrics = get_business_metrics()
-    
+
     result = await report(state)
-    
+
     # Track insight generation
     if result.report:
-        metrics.record_insight_generation(quality_score=0.8)  # Could be enhanced with quality assessment
-        
+        metrics.record_insight_generation(
+            quality_score=0.8
+        )  # Could be enhanced with quality assessment
+
         business_metrics.track_insight_quality(
             feedback_score=0.8,  # Could be enhanced with actual user feedback
             question=state.question,
-            insight_length=len(result.report)
+            insight_length=len(result.report),
         )
-        
+
         # Log report generation
         lgda_logger.log_business_metric(
             "insights_generated",
             1.0,
             dimensions={
                 "report_length": str(len(result.report)),
-                "has_summary": str(bool(getattr(state, 'df_summary', None)))
-            }
+                "has_summary": str(bool(getattr(state, "df_summary", None))),
+            },
         )
-    
+
     return result
 
 
@@ -327,7 +344,7 @@ def get_instrumented_node(node_name: str):
 
 def enable_observability_for_graph(graph_config: Dict[str, Any]) -> Dict[str, Any]:
     """Enable observability for a LangGraph configuration.
-    
+
     This function can be used to replace regular nodes with instrumented ones
     in a graph configuration.
     """

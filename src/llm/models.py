@@ -34,7 +34,7 @@ class LLMRequest:
 
     prompt: str
     context: LLMContext = LLMContext.GENERAL
-    max_tokens: int = 4000  # Increased default for complex responses
+    max_tokens: int = 1000  # Default; callers can override using PerformanceConfig
     temperature: float = 0.0
     system_prompt: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None

@@ -1,4 +1,5 @@
 import base64
+import builtins as _builtins
 import json
 import os
 import warnings
@@ -120,22 +121,16 @@ class LGDAConfig(BaseSettings):
     disable_observability: bool = Field(
         default=False, validation_alias="LGDA_DISABLE_OBSERVABILITY"
     )
-    metrics_enabled: bool = Field(
-        default=True, validation_alias="LGDA_METRICS_ENABLED"
-    )
-    logging_enabled: bool = Field(
-        default=True, validation_alias="LGDA_LOGGING_ENABLED"
-    )
-    tracing_enabled: bool = Field(
-        default=True, validation_alias="LGDA_TRACING_ENABLED"
-    )
+    metrics_enabled: bool = Field(default=True, validation_alias="LGDA_METRICS_ENABLED")
+    logging_enabled: bool = Field(default=True, validation_alias="LGDA_LOGGING_ENABLED")
+    tracing_enabled: bool = Field(default=True, validation_alias="LGDA_TRACING_ENABLED")
     health_monitoring_enabled: bool = Field(
         default=True, validation_alias="LGDA_HEALTH_MONITORING_ENABLED"
     )
     business_metrics_enabled: bool = Field(
         default=True, validation_alias="LGDA_BUSINESS_METRICS_ENABLED"
     )
-    
+
     # Observability endpoints and configuration
     prometheus_endpoint: Optional[str] = Field(
         default=None, validation_alias="LGDA_PROMETHEUS_ENDPOINT"
@@ -188,7 +183,7 @@ class LGDAConfig(BaseSettings):
                 parsed = json.loads(v)
                 if isinstance(parsed, list):
                     return [str(item) for item in parsed]
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 # Fallback to comma-separated parsing
                 return [t.strip() for t in v.split(",") if t.strip()]
         raise ValueError("allowed_tables must be a list or comma-separated string")
@@ -197,7 +192,7 @@ class LGDAConfig(BaseSettings):
     def is_observability_enabled(self) -> bool:
         """Check if observability is enabled overall."""
         # Use getattr to safely get disable_observability since it might be extra field
-        disable_flag = getattr(self, 'disable_observability', False)
+        disable_flag = getattr(self, "disable_observability", False)
         return self.observability_enabled and not disable_flag
 
     @property
@@ -205,11 +200,13 @@ class LGDAConfig(BaseSettings):
         """Get effective observability configuration."""
         base_enabled = self.is_observability_enabled
         return {
-            "metrics": base_enabled and getattr(self, 'metrics_enabled', True),
-            "logging": base_enabled and getattr(self, 'logging_enabled', True),
-            "tracing": base_enabled and getattr(self, 'tracing_enabled', True),
-            "health_monitoring": base_enabled and getattr(self, 'health_monitoring_enabled', True),
-            "business_metrics": base_enabled and getattr(self, 'business_metrics_enabled', True),
+            "metrics": base_enabled and getattr(self, "metrics_enabled", True),
+            "logging": base_enabled and getattr(self, "logging_enabled", True),
+            "tracing": base_enabled and getattr(self, "tracing_enabled", True),
+            "health_monitoring": base_enabled
+            and getattr(self, "health_monitoring_enabled", True),
+            "business_metrics": base_enabled
+            and getattr(self, "business_metrics_enabled", True),
         }
 
     # (second __init__ removed; logic consolidated above)
@@ -259,13 +256,16 @@ class LGDAConfig(BaseSettings):
         env_file=None,
         case_sensitive=False,
         env_ignore_empty=True,
-        extra='allow',  # Allow extra fields for extensibility
+        extra="allow",  # Allow extra fields for extensibility
     )
 
 
 # Preserve original class identity across reloads for test stability
 if "LGDAConfig_ORIGINAL" not in globals():
     LGDAConfig_ORIGINAL = LGDAConfig
+    # Also publish canonical references into builtins so `isinstance` survives reloads in tests
+    if not hasattr(_builtins, "LGDAConfig"):
+        setattr(_builtins, "LGDAConfig", LGDAConfig)
 
 
 # Credential Manager for secure credential handling
@@ -324,6 +324,15 @@ class CredentialManager:
             if any(sensitive in key.lower() for sensitive in sensitive_keys):
                 masked[key] = "***MASKED***"
         return masked
+
+
+# Expose canonical class into builtins for stable isinstance checks during reloads
+if not hasattr(_builtins, "CredentialManager"):
+    setattr(_builtins, "CredentialManager", CredentialManager)
+
+# Preserve original class identity across reloads for test stability
+if "CredentialManager_ORIGINAL" not in globals():
+    CredentialManager_ORIGINAL = CredentialManager
 
 
 # Feature Flags
@@ -436,6 +445,15 @@ class FeatureFlagManager:
         self.custom_rules[flag] = rule
 
 
+# Expose into builtins for stable isinstance checks
+if not hasattr(_builtins, "FeatureFlagManager"):
+    setattr(_builtins, "FeatureFlagManager", FeatureFlagManager)
+
+# Preserve original class identity across reloads for test stability
+if "FeatureFlagManager_ORIGINAL" not in globals():
+    FeatureFlagManager_ORIGINAL = FeatureFlagManager
+
+
 # Performance Configuration
 @dataclass
 class PerformanceConfig:
@@ -482,6 +500,13 @@ class PerformanceConfig:
             return cls()
 
 
+# Preserve original class identity across reloads and expose to builtins for stable isinstance checks
+if "PerformanceConfig_ORIGINAL" not in globals():
+    PerformanceConfig_ORIGINAL = PerformanceConfig
+    if not hasattr(_builtins, "PerformanceConfig"):
+        setattr(_builtins, "PerformanceConfig", PerformanceConfig)
+
+
 # Configuration Factory
 class ConfigFactory:
     """Central configuration factory."""
@@ -504,10 +529,13 @@ class ConfigFactory:
     def create_managers(config: LGDAConfig) -> tuple:
         """Creates all configuration managers."""
         profile = ENVIRONMENT_PROFILES[config.environment]
-
-        credential_manager = CredentialManager(config)
-        feature_manager = FeatureFlagManager(config, profile)
-        performance_config = PerformanceConfig.for_environment(config.environment)
+        # Use canonical/original classes to ensure stable identity
+        CredMgrCls = globals().get("CredentialManager_ORIGINAL", CredentialManager)
+        FFMgrCls = globals().get("FeatureFlagManager_ORIGINAL", FeatureFlagManager)
+        credential_manager = CredMgrCls(config)
+        feature_manager = FFMgrCls(config, profile)
+        PerfCls = globals().get("PerformanceConfig_ORIGINAL", PerformanceConfig)
+        performance_config = PerfCls.for_environment(config.environment)
 
         return credential_manager, feature_manager, performance_config
 

@@ -3,7 +3,7 @@
 This module provides comprehensive observability capabilities including:
 - Prometheus metrics collection
 - Structured logging with correlation
-- Distributed tracing support  
+- Distributed tracing support
 - Health monitoring
 - Business intelligence metrics
 
@@ -14,18 +14,23 @@ to ensure zero performance impact when not needed.
 from .business_metrics import BusinessMetrics
 from .health import HealthMonitor
 from .logging import LGDALogger
+from .manager import (
+    ObservabilityManager,
+    get_observability_manager,
+    setup_observability,
+    shutdown_observability,
+)
 from .metrics import LGDAMetrics
 from .tracing import LGDATracer
-from .manager import ObservabilityManager, get_observability_manager, setup_observability, shutdown_observability
 
 __all__ = [
     "LGDAMetrics",
-    "LGDALogger", 
+    "LGDALogger",
     "LGDATracer",
     "HealthMonitor",
     "BusinessMetrics",
     "ObservabilityManager",
     "get_observability_manager",
-    "setup_observability", 
+    "setup_observability",
     "shutdown_observability",
 ]
