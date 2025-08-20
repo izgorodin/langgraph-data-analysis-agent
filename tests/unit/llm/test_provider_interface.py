@@ -23,7 +23,7 @@ class TestLLMModels:
 
         assert request.prompt == "Test prompt"
         assert request.context == LLMContext.GENERAL
-        assert request.max_tokens == 1000
+        assert request.max_tokens == 4000  # Updated to match unified config default
         assert request.temperature == 0.0
         assert request.system_prompt is None
         assert request.metadata is None

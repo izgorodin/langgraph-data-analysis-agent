@@ -9,6 +9,7 @@ from typing import Optional
 from unittest.mock import MagicMock  # type: ignore
 
 from ..config import settings
+from ..configuration import get_llm_config
 from . import genai as legacy_genai  # exposed for legacy tests
 from .models import LLMContext, LLMRequest
 from .providers import gemini as gemini_module
@@ -29,13 +30,16 @@ def llm_completion(
     For legacy tests, call Gemini directly (no fallback/validator),
     propagate provider errors, and honor custom model when provided.
     """
+    # Get LLM configuration
+    llm_config = get_llm_config()
+
     # Build request
     request = LLMRequest(
         prompt=prompt,
         context=LLMContext.GENERAL,
         system_prompt=system,
-        max_tokens=4000,  # Increased for complex responses and future memory features
-        temperature=0.0,
+        max_tokens=llm_config.get_max_tokens_for_context("general"),
+        temperature=llm_config.get_temperature_for_context("general"),
     )
 
     # Decide execution mode
