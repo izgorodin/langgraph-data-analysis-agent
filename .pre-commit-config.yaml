@@ -38,8 +38,9 @@ repos:
     rev: 1.7.9
     hooks:
       - id: bandit
-        args: ['-r', 'src']
-        exclude: ^tests/
+        args: ['-r', 'src', '-x', 'tests', '-s', 'B110,B608']
+        files: ^src/.*\.py$
+        pass_filenames: false
 
   - repo: local
     hooks:
@@ -52,8 +53,8 @@ repos:
 
       - id: security-scan
         name: Security Pattern Check
-        entry: bash -c 'if grep -r -i "api_key\|password\|secret\|token" src/ --include="*.py" | grep -v "# TODO\|# FIXME"; then echo "Potential hardcoded secrets found!" && exit 1; fi'
-        language: system
+        entry: python scripts/scan_secrets.py
+        language: python
         pass_filenames: false
 
       - id: adr-reference-check

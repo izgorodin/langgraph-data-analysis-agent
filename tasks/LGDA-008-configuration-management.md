@@ -2,13 +2,13 @@
 
 **Priority**: HIGH | **Type**: Infrastructure | **Parallel**: Can run with LGDA-007, LGDA-009
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-002** (Configuration Management), we need to eliminate hardcoded values scattered across multiple files and create a centralized, type-safe configuration system.
 
-## Objective
+## Цель задачи
 Consolidate configuration management to eliminate hardcoded values, provide environment-specific overrides, and ensure type safety across the application.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **Scattered hardcoded values**: `max_tokens` in 3 different files (2000, 4000, 1000)
@@ -109,7 +109,7 @@ def get_config() -> UnifiedConfig:
 - **Coordinates with**: LGDA-009 on error configuration
 - **Enables**: LGDA-010 (test configuration), LGDA-011 (monitoring config)
 
-## Acceptance Criteria
+## Критерии приемки
 
 ### Functional Requirements
 - ✅ Single source of truth for all configuration
@@ -144,6 +144,14 @@ def test_configuration_consistency_across_environments():
 def test_backward_compatibility_legacy_config():
     """Legacy configuration paths continue to work"""
 ```
+
+## Возможные сложности
+- Совместимость со старыми переменными окружения
+- Несоответствие типов и валидации при миграции
+- Потенциальная деградация производительности при горячей/холодной загрузке настроек
+
+## Integration Points
+Взаимодействует с LGDA-007 (ретраи), LGDA-009 (ошибки), LGDA-010 (тестовая конфигурация).
 
 ## Configuration Elimination Targets
 

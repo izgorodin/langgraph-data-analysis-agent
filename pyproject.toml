@@ -37,7 +37,8 @@ mypy = "^1.11.0"
 bandit = "^1.7.0"
 safety = "^3.2.0"
 pre-commit = "^3.8.0"
-sphinx = "^8.0.0"
+# Pin Sphinx below 8 to satisfy sphinx-rtd-theme <3 requirement in CI
+sphinx = "^7.3.0"
 sphinx-rtd-theme = "^2.0.0"
 
 [tool.poetry.group.test.dependencies]
@@ -109,7 +110,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "unit: Unit tests",
-    "integration: Integration tests", 
+    "integration: Integration tests",
     "slow: Slow running tests",
     "requires_credentials: Tests that need real API credentials",
 ]
@@ -131,7 +132,7 @@ exclude_lines = [
     "if self.debug:",
     "if settings.DEBUG",
     "raise AssertionError",
-    "raise NotImplementedError", 
+    "raise NotImplementedError",
     "if 0:",
     "if __name__ == .__main__.:",
     "class .*\\bProtocol\\):",
@@ -153,6 +154,10 @@ exclude = [
     ".venv",
     ".eggs",
     "*.egg",
+]
+# tests often include long strings and JSON fixtures
+per-file-ignores = [
+    "tests/*: E501",
 ]
 
 [build-system]

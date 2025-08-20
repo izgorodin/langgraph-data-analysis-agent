@@ -21,7 +21,7 @@ jobs:
             const owner = context.repo.owner; const repo = context.repo.repo;
             const files = await github.paginate(github.rest.pulls.listFiles, {owner, repo, pull_number: pr.number});
             const labels = new Set();
-            
+
             // Check for component areas
             if (files.some(f=>f.filename.startsWith('tasks/'))) labels.add('lgda-task');
             if (files.some(f=>f.filename.includes('bq.py')||f.filename.includes('bigquery'))) labels.add('bigquery');
@@ -31,7 +31,7 @@ jobs:
             if (files.some(f=>f.filename.startsWith('tests/'))) labels.add('testing');
             if (files.some(f=>f.filename.startsWith('docs/adr/'))) labels.add('architecture');
             if (files.some(f=>f.filename.startsWith('.github/'))) labels.add('ci-cd');
-            
+
             // Check for task IDs in PR title/body
             const text = (pr.title || '') + '\n' + (pr.body || '');
             const taskIds = text.match(/LGDA-\d{3}/g) || [];
@@ -42,11 +42,24 @@ jobs:
                 labels.add(`task:${taskId.toLowerCase()}`);
               }
             }
-            
+
             // Security-related changes
             if (files.some(f=>f.filename.includes('sql') && f.filename.includes('validation'))) labels.add('security');
             if (files.some(f=>f.filename.includes('credential')||f.filename.includes('auth'))) labels.add('security');
-            
+
             if (labels.size) {
-              await github.rest.issues.addLabels({owner, repo, issue_number: pr.number, labels: Array.from(labels)});
+              // Ensure labels exist (create if missing)
+              for (const name of Array.from(labels)) {
+                try {
+                  await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [name] });
+                } catch (e) {
+                  // If label doesn't exist, create it and retry
+                  try {
+                    await github.rest.issues.createLabel?.({ owner, repo, name, color: 'cfd3d7' });
+                  } catch (_) { /* ignore create errors if API differs */ }
+                  try {
+                    await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [name] });
+                  } catch (_) { /* ignore if still failing */ }
+                }
+              }
             }
