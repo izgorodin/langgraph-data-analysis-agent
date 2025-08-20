@@ -10,11 +10,11 @@ import asyncio
 import json
 from typing import Dict, List
 
+from ..configuration import get_llm_config
 from ..llm import LLMProviderManager
 from ..llm.manager import get_default_manager
 from ..llm.models import LLMContext, LLMRequest
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
-from .state import AgentState
 
 
 class LLMNodeIntegration:
@@ -22,6 +22,7 @@ class LLMNodeIntegration:
 
     def __init__(self, manager: LLMProviderManager = None):
         self.manager = manager or get_default_manager()
+        self.llm_config = get_llm_config()
 
     async def generate_plan(self, question: str, schema: Dict[str, List[str]]) -> Dict:
         """Generate analysis plan using LLM with proper context."""
@@ -42,8 +43,8 @@ class LLMNodeIntegration:
             prompt=prompt,
             context=LLMContext.PLANNING,
             system_prompt=PLAN_SYSTEM,
-            temperature=0.1,
-            max_tokens=800,
+            temperature=self.llm_config.get_temperature_for_context("planning"),
+            max_tokens=self.llm_config.get_max_tokens_for_context("planning"),
         )
 
         response = await self.manager.generate_with_fallback(request)
@@ -82,8 +83,8 @@ class LLMNodeIntegration:
             prompt=prompt,
             context=LLMContext.SQL_GENERATION,
             system_prompt=SQL_SYSTEM,
-            temperature=0.0,  # Deterministic for SQL
-            max_tokens=1200,
+            temperature=self.llm_config.get_temperature_for_context("sql_generation"),
+            max_tokens=self.llm_config.get_max_tokens_for_context("sql_generation"),
         )
 
         response = await self.manager.generate_with_fallback(request)
@@ -123,8 +124,8 @@ class LLMNodeIntegration:
             prompt=prompt,
             context=LLMContext.ANALYSIS,
             system_prompt=REPORT_SYSTEM,
-            temperature=0.2,  # Slightly creative for insights
-            max_tokens=1000,
+            temperature=self.llm_config.get_temperature_for_context("analysis"),
+            max_tokens=self.llm_config.get_max_tokens_for_context("analysis"),
         )
 
         response = await self.manager.generate_with_fallback(request)

@@ -10,6 +10,16 @@ from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
+# Import config for default values
+try:
+    from ..configuration import get_llm_config
+
+    _llm_config = get_llm_config()
+    _default_max_tokens = _llm_config.max_tokens_general
+except ImportError:
+    # Fallback for cases where config isn't available
+    _default_max_tokens = 4000
+
 
 class LLMProvider(str, Enum):
     """Supported LLM providers."""
@@ -34,7 +44,7 @@ class LLMRequest:
 
     prompt: str
     context: LLMContext = LLMContext.GENERAL
-    max_tokens: int = 4000  # Increased default for complex responses
+    max_tokens: int = _default_max_tokens  # Uses config default, overridable
     temperature: float = 0.0
     system_prompt: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None

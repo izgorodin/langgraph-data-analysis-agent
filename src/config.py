@@ -10,6 +10,15 @@ from typing import Any, Callable, Dict, List, Optional, Union
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+# Import unified configuration - delay to avoid circular imports
+def _get_unified_config():
+    """Late import to avoid circular dependencies."""
+    from .configuration import get_unified_config
+
+    return get_unified_config()
+
+
 try:
     # Auto-load .env early (dev convenience). Safe if not present.
     from dotenv import load_dotenv  # type: ignore
@@ -393,7 +402,7 @@ class PerformanceConfig:
     llm_timeout: int = 30
     llm_retry_count: int = 3
     llm_max_tokens: int = (
-        4000  # Increased for complex responses and future memory features
+        4000  # Use unified config default, maintained for backward compatibility
     )
 
     # Memory management
@@ -457,3 +466,14 @@ class ConfigFactory:
 
 # Maintain backward compatibility
 settings = Settings()
+
+
+# Convenience functions for accessing unified config components
+def get_llm_max_tokens_for_context(context: str) -> int:
+    """Get max tokens for specific LLM context from unified config."""
+    return _get_unified_config().llm.get_max_tokens_for_context(context)
+
+
+def get_llm_temperature_for_context(context: str) -> float:
+    """Get temperature for specific LLM context from unified config."""
+    return _get_unified_config().llm.get_temperature_for_context(context)
