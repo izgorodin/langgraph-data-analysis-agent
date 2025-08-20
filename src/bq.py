@@ -22,6 +22,12 @@ from google.cloud import bigquery
 from .bq_errors import QueryTimeoutError, RateLimitExceededError, TransientQueryError
 from .bq_metrics import MetricsCollector, QueryMetrics
 from .config import settings
+from .core.migration import (
+    is_unified_retry_enabled,
+    bigquery_retry_decorator,
+    get_bigquery_retry_strategy,
+    migrate_legacy_retry_function
+)
 
 
 # Feature flag configuration with environment variables
@@ -515,10 +521,29 @@ def run_query(
             # For testing, don't transform generic exceptions into TransientQueryError if they're not actually transient
             raise Exception(f"BigQuery execution failed: {e}")
 
-    try:
-        return _retry_with_backoff(_execute_query_attempt)
-    except Exception as e:
-        # Final fallback to record circuit breaker failure if not already done
-        if not isinstance(e, (ValueError, Forbidden, NotFound)):
-            _circuit_breaker.record_failure()
-        raise e
+    # Choose retry mechanism based on unified retry flag
+    if is_unified_retry_enabled():
+        # Use unified retry system
+        strategy = get_bigquery_retry_strategy()
+        from .core.retry import retry_with_strategy
+        
+        @retry_with_strategy(strategy, context_name="bigquery_query")
+        def unified_retry_wrapper():
+            return _execute_query_attempt()
+        
+        try:
+            return unified_retry_wrapper()
+        except Exception as e:
+            # Final fallback to record circuit breaker failure if not already done
+            if not isinstance(e, (ValueError, Forbidden, NotFound)):
+                _circuit_breaker.record_failure()
+            raise e
+    else:
+        # Use legacy retry system
+        try:
+            return _retry_with_backoff(_execute_query_attempt)
+        except Exception as e:
+            # Final fallback to record circuit breaker failure if not already done
+            if not isinstance(e, (ValueError, Forbidden, NotFound)):
+                _circuit_breaker.record_failure()
+            raise e
