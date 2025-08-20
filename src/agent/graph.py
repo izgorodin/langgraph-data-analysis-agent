@@ -11,6 +11,44 @@ from src.agent.nodes import (
     validate_sql_node,
 )
 from src.agent.state import AgentState
+from src.core.migration import is_unified_retry_enabled
+
+
+def _should_retry_sql_generation(state: AgentState) -> bool:
+    """Determine if SQL generation should be retried based on unified retry settings."""
+    if not is_unified_retry_enabled():
+        # Legacy behavior: no retries at graph level
+        return False
+    
+    # Only retry business logic errors, not infrastructure errors
+    if state.error is None or state.last_error is None:
+        return False
+    
+    # Respect retry limits
+    if state.retry_count >= state.max_retries:
+        return False
+    
+    # Only retry validation errors and LLM generation errors
+    # Don't retry infrastructure errors (those are handled at lower levels)
+    error_message = str(state.last_error).lower()
+    
+    # Retry SQL validation errors (business logic)
+    if any(phrase in error_message for phrase in [
+        "sql parse error", "forbidden tables", "invalid sql", 
+        "syntax error", "missing column", "query must start"
+    ]):
+        return True
+    
+    # Retry LLM generation failures (business logic) - be more specific
+    if any(phrase in error_message for phrase in [
+        "llm completion", "model completion", "generation failed", 
+        "llm timeout", "model timeout"
+    ]):
+        return True
+    
+    # Don't retry infrastructure errors (handled by lower-level retry)
+    # These include: "connection error", "network timeout", "server error", etc.
+    return False
 
 
 def build_graph():
@@ -31,7 +69,13 @@ def build_graph():
         # Proceed when validation passed
         if state.error is None:
             return "execute_sql"
-        # Validation failed; end early to avoid loops/retries (tests expect no retry here)
+        
+        # Check if we should retry SQL generation with unified retry
+        if _should_retry_sql_generation(state):
+            state.retry_count += 1
+            return "synthesize_sql"
+        
+        # Validation failed and no retry - end execution
         return END
 
     graph.add_conditional_edges(

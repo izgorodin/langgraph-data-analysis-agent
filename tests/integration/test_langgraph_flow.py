@@ -1,6 +1,7 @@
 """Integration tests for LangGraph node flow."""
 
 import json
+import os
 from unittest.mock import Mock, patch
 
 import pytest
@@ -82,6 +83,7 @@ class TestLangGraphFlow:
         # At least plan node should execute
         assert "plan" in node_names
 
+    @patch.dict(os.environ, {"LGDA_USE_UNIFIED_RETRY": "false"})
     def test_graph_error_handling_invalid_sql(
         self, mock_bigquery_client, mock_gemini_client
     ):
@@ -103,6 +105,7 @@ class TestLangGraphFlow:
             assert "SQL parse error" in final_state.error
             assert final_state.df_summary is None  # Should not reach execution
 
+    @patch.dict(os.environ, {"LGDA_USE_UNIFIED_RETRY": "false"})
     def test_graph_conditional_edge_on_error(
         self, mock_bigquery_client, mock_gemini_client
     ):

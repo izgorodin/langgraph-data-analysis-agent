@@ -10,6 +10,8 @@ from sqlglot import exp
 
 from ..bq import get_schema, run_query
 from ..config import settings
+from ..core.migration import is_unified_retry_enabled
+from ..core.retry import retry_with_strategy, RetryConfig, ErrorCategory, classify_error
 from ..llm import llm_completion
 from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
@@ -22,6 +24,60 @@ def _set_validation_error(state: AgentState, error_message: str) -> None:
     """Set error and update retry state for validation failures."""
     state.last_error = error_message
     state.error = error_message
+
+
+def _generate_sql_with_retry(state: AgentState) -> str:
+    """Generate SQL with optional unified retry for transient LLM failures."""
+    
+    def _attempt_sql_generation():
+        # Build prompt with error context for retry
+        prompt = SQL_TEMPLATE.render(
+            plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
+        )
+        
+        # Add error context if this is a retry
+        if state.retry_count > 0 and state.last_error:
+            prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
+        
+        sql = llm_completion(prompt, system=SQL_SYSTEM)
+        cleaned = (sql or "").strip().strip("`")
+        
+        # Remove common LLM prefixes
+        if cleaned.lower().startswith("sql\n"):
+            cleaned = cleaned[4:].strip()
+        elif cleaned.lower().startswith("sql"):
+            cleaned = cleaned[3:].strip()
+        
+        # If the model returned JSON by mistake, fall back to a simple safe SELECT
+        if cleaned.startswith("{"):
+            # Use first table from plan or first allowed table
+            tables = []
+            if state.plan_json and "tables" in state.plan_json:
+                tables = state.plan_json["tables"]
+            if not tables and ALLOWED:
+                tables = list(ALLOWED)
+            first_table = tables[0] if tables else "orders"
+            cleaned = f"SELECT * FROM {first_table} LIMIT 10"
+            
+        return cleaned
+    
+    # Use unified retry if enabled, otherwise fall back to original behavior
+    if is_unified_retry_enabled():
+        
+        @retry_with_strategy(RetryConfig.SQL_GENERATION, context_name="sql_generation")
+        def retryable_sql_generation():
+            return _attempt_sql_generation()
+        
+        try:
+            return retryable_sql_generation()
+        except Exception as e:
+            # The unified retry system handles the actual retries,
+            # but we update state for compatibility with graph-level logic
+            state.last_error = str(e)
+            raise e
+    else:
+        # Original behavior - no automatic retry
+        return _attempt_sql_generation()
 
 
 PLAN_TEMPLATE = Template(
@@ -123,30 +179,15 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             # Fallback to original implementation
             pass
 
-    # Build prompt with error context for retry
-    prompt = SQL_TEMPLATE.render(
-        plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
-    )
-
-    # Add error context if this is a retry
-    if state.retry_count > 0 and state.last_error:
-        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
-
-    sql = llm_completion(prompt, system=SQL_SYSTEM)
-    cleaned = (sql or "").strip().strip("`")
-
-    # Remove common LLM prefixes
-    if cleaned.lower().startswith("sql\n"):
-        cleaned = cleaned[4:].strip()
-    elif cleaned.lower().startswith("sql"):
-        cleaned = cleaned[3:].strip()
-
-    # If the model returned JSON by mistake, fall back to a simple safe SELECT
-    if cleaned.startswith("{"):
-        first_table = next(iter(ALLOWED)) if ALLOWED else "orders"
-        cleaned = f"SELECT * FROM {first_table} LIMIT 10"
-    state.sql = cleaned
-    return state
+    # Use unified retry-enabled SQL generation
+    try:
+        state.sql = _generate_sql_with_retry(state)
+        return state
+    except Exception as e:
+        # For compatibility with existing error handling
+        state.error = str(e)
+        state.last_error = str(e)
+        return state
 
 
 # Node: validate_sql
