@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Dict
 
@@ -9,13 +10,14 @@ from jinja2 import Template
 from sqlglot import exp
 
 from ..bq import get_schema, run_query
-from ..config import settings
+from ..config import LGDAConfig, settings
 from ..llm import llm_completion
 from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
 from .state import AgentState
 
 ALLOWED = set(settings.allowed_tables)
+logger = logging.getLogger(__name__)
 
 
 def _set_validation_error(state: AgentState, error_message: str) -> None:
@@ -450,12 +452,37 @@ def execute_sql_node(state: AgentState) -> AgentState:
 
 
 def analyze_df_node(state: AgentState) -> AgentState:
+    """Analyze DataFrame with strict error checking to prevent fabrication on error paths."""
+
+    # Get configuration for strict mode (default: True)
+    config = LGDAConfig()
+    strict_mode = getattr(config, "strict_no_fake_report", True)
+
+    # Strict fail-fast check: if error exists, do not generate any analysis content
+    if state.error is not None:
+        if strict_mode:
+            logger.warning(
+                "analyze_df_node: fail-fast triggered, error exists in state",
+                extra={
+                    "fail_fast": True,
+                    "error_category": "PERMANENT",
+                    "state_error": state.error,
+                    "node": "analyze_df",
+                },
+            )
+            return state
+        else:
+            logger.info(
+                "analyze_df_node: continuing despite error (strict mode disabled)"
+            )
+
     # light deterministic notes; LLM will write final report
     notes = []
     if state.df_summary:
         rows = state.df_summary.get("rows", 0)
         cols = state.df_summary.get("columns", [])
         notes.append(f"Result shape: {rows} rows × {len(cols)} columns")
+
     state.history.append({"analysis": "\n".join(notes)})
     return state
 
@@ -464,9 +491,30 @@ def analyze_df_node(state: AgentState) -> AgentState:
 
 
 def report_node(state: AgentState) -> AgentState:
-    # If an error already exists, do not attempt report generation
-    if getattr(state, "error", None):
-        return state
+    """Generate report with strict error checking to prevent fabrication on error paths."""
+
+    # Get configuration for strict mode (default: True)
+    config = LGDAConfig()
+    strict_mode = getattr(config, "strict_no_fake_report", True)
+
+    # Enhanced fail-fast check: if error exists, do not generate any report content
+    if state.error is not None:
+        if strict_mode:
+            logger.warning(
+                "report_node: fail-fast triggered, blocking report generation due to error",
+                extra={
+                    "fail_fast": True,
+                    "error_category": "USER_GUIDED",
+                    "state_error": state.error,
+                    "node": "report",
+                    "fabrication_prevented": True,
+                },
+            )
+            # Do not set state.report - leave it None to indicate no report was generated
+            return state
+        else:
+            logger.info("report_node: continuing despite error (strict mode disabled)")
+
     # Option to use enhanced LLM integration
     if hasattr(state, "use_enhanced_llm") and state.use_enhanced_llm:
         try:
