@@ -392,7 +392,9 @@ class PerformanceConfig:
     # LLM settings
     llm_timeout: int = 30
     llm_retry_count: int = 3
-    llm_max_tokens: int = 2000
+    llm_max_tokens: int = (
+        4000  # Increased for complex responses and future memory features
+    )
 
     # Memory management
     max_dataframe_rows: int = 10000

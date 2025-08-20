@@ -34,7 +34,7 @@ def llm_completion(
         prompt=prompt,
         context=LLMContext.GENERAL,
         system_prompt=system,
-        max_tokens=1000,
+        max_tokens=4000,  # Increased for complex responses and future memory features
         temperature=0.0,
     )
 

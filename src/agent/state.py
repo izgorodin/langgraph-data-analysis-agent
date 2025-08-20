@@ -13,3 +13,8 @@ class AgentState(BaseModel):
     report: Optional[str] = None
     error: Optional[str] = None
     history: List[Dict[str, str]] = Field(default_factory=list)
+
+    # Retry mechanism
+    retry_count: int = 0
+    max_retries: int = 2
+    last_error: Optional[str] = None

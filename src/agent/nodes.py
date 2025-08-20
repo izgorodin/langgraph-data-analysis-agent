@@ -17,12 +17,31 @@ from .state import AgentState
 
 ALLOWED = set(settings.allowed_tables)
 
+
+def _set_validation_error(state: AgentState, error_message: str) -> None:
+    """Set error and update retry state for validation failures."""
+    state.last_error = error_message
+    state.error = error_message
+
+
 PLAN_TEMPLATE = Template(
     """
 Return a JSON object for this analysis request.
 Question: {{ question }}
 Tables & Columns\n{% for t, cols in schema.items() %}- {{t}}: {{ cols|join(', ') }}\n{% endfor %}
+
+EXAMPLES:
+For "What is the average order value?":
+{"task": "Calculate average order value", "tables": ["orders", "order_items"], "metrics": ["AVG(order_total)"], "grain": "order_id"}
+
+For "Top customers by revenue":
+{"task": "Rank customers by total revenue", "tables": ["users", "orders", "order_items"], "dimensions": ["users.id", "users.email"], "metrics": ["SUM(sale_price)"], "grain": "user_id"}
+
+For "Customer segments analysis":
+{"task": "Analyze customer segments by demographics", "tables": ["users", "orders", "order_items"], "dimensions": ["users.country", "users.age"], "metrics": ["AVG(order_total)", "COUNT(order_id)"], "grain": "segment"}
+
 JSON keys: task, tables, time_range, dimensions, metrics, filters, grain.
+IMPORTANT: Always provide specific task description and relevant metrics!
     """
 )
 
@@ -31,6 +50,8 @@ SQL_TEMPLATE = Template(
 Write a BigQuery Standard SQL SELECT for this PLAN:
 PLAN: {{ plan_json }}
 Only use these tables: {{ allowed_tables }}
+IMPORTANT: Use fully qualified table names with dataset: `bigquery-public-data.thelook_ecommerce.TABLE_NAME`
+Examples: `bigquery-public-data.thelook_ecommerce.orders`, `bigquery-public-data.thelook_ecommerce.products`
 Prefer safe, explicit JOINs; qualify columns with table aliases; include WHERE for time_range if present.
 Limit to 1000 rows unless aggregation is performed.
     """
@@ -102,12 +123,24 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             # Fallback to original implementation
             pass
 
-    # Original implementation for backward compatibility
+    # Build prompt with error context for retry
     prompt = SQL_TEMPLATE.render(
         plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
     )
+
+    # Add error context if this is a retry
+    if state.retry_count > 0 and state.last_error:
+        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
+
     sql = llm_completion(prompt, system=SQL_SYSTEM)
     cleaned = (sql or "").strip().strip("`")
+
+    # Remove common LLM prefixes
+    if cleaned.lower().startswith("sql\n"):
+        cleaned = cleaned[4:].strip()
+    elif cleaned.lower().startswith("sql"):
+        cleaned = cleaned[3:].strip()
+
     # If the model returned JSON by mistake, fall back to a simple safe SELECT
     if cleaned.startswith("{"):
         first_table = next(iter(ALLOWED)) if ALLOWED else "orders"
@@ -128,19 +161,19 @@ def validate_sql_node(state: AgentState) -> AgentState:
         _check_multi_statement(state.sql)
         _validate_syntax_strictly(state.sql)  # Add strict syntax validation
     except Exception as e:  # noqa: BLE001
-        state.error = str(e)
+        _set_validation_error(state, str(e))
         return state
 
     # Parse SQL
     try:
         parsed = sqlglot.parse_one(state.sql, read="bigquery")
     except Exception as e:  # noqa: BLE001
-        state.error = f"SQL parse error: {e}"
+        _set_validation_error(state, f"SQL parse error: {e}")
         return state
 
     # Handle empty/invalid parsed results
     if parsed is None:
-        state.error = "Invalid or empty SQL query"
+        _set_validation_error(state, "Invalid or empty SQL query")
         return state
 
     # Policy: SELECT only (but allow UNION of SELECT statements)
@@ -150,7 +183,7 @@ def validate_sql_node(state: AgentState) -> AgentState:
         # Treat as complex query; no LIMIT injection
         has_aggregation = True
     elif not isinstance(parsed, exp.Select):
-        state.error = "Only SELECT queries are allowed"
+        _set_validation_error(state, "Only SELECT queries are allowed")
         return state
 
     # Policy: block non-allowed tables
@@ -167,7 +200,10 @@ def validate_sql_node(state: AgentState) -> AgentState:
 
     if not real_tables.issubset(ALLOWED):
         forbidden_tables = real_tables - ALLOWED
-        state.error = f"Forbidden tables detected: {', '.join(forbidden_tables)} - potential security violation"
+        _set_validation_error(
+            state,
+            f"Forbidden tables detected: {', '.join(forbidden_tables)} - potential security violation",
+        )
         return state
 
     # Enhanced aggregation detection for LIMIT injection (unless already set above)
@@ -392,12 +428,19 @@ def execute_sql_node(state: AgentState) -> AgentState:
     except Exception as e:  # noqa: BLE001
         state.error = str(e)
         return state
+
+    # Convert Timestamp columns to strings to avoid JSON serialization errors
+    df_for_summary = df.copy()
+    for col in df_for_summary.columns:
+        if df_for_summary[col].dtype.name.startswith("datetime"):
+            df_for_summary[col] = df_for_summary[col].astype(str)
+
     # summarize
     summary = {
         "rows": len(df),
         "columns": list(df.columns),
-        "head": df.head(10).to_dict(orient="records"),
-        "describe": json.loads(df.describe(include="all").to_json()),
+        "head": df_for_summary.head(10).to_dict(orient="records"),
+        "describe": json.loads(df_for_summary.describe(include="all").to_json()),
     }
     state.df_summary = summary
     return state

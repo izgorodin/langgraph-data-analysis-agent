@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langgraph.graph import END, StateGraph
 
-from .nodes import (
+from src.agent.nodes import (
     analyze_df_node,
     execute_sql_node,
     plan_node,
@@ -10,7 +10,7 @@ from .nodes import (
     synthesize_sql_node,
     validate_sql_node,
 )
-from .state import AgentState
+from src.agent.state import AgentState
 
 
 def build_graph():
@@ -28,10 +28,21 @@ def build_graph():
     graph.add_edge("synthesize_sql", "validate_sql")
 
     def on_valid(state: AgentState):
-        return "execute_sql" if state.error is None else END
+        if state.error is None:
+            return "execute_sql"
+        elif state.retry_count < state.max_retries:
+            # Retry: increment counter and go back to synthesize_sql
+            state.retry_count += 1
+            state.error = None  # Clear error for retry
+            return "synthesize_sql"
+        else:
+            # Max retries reached, end with error
+            return END
 
     graph.add_conditional_edges(
-        "validate_sql", on_valid, {"execute_sql": "execute_sql", END: END}
+        "validate_sql",
+        on_valid,
+        {"execute_sql": "execute_sql", "synthesize_sql": "synthesize_sql", END: END},
     )
 
     def on_exec(state: AgentState):

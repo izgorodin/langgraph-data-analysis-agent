@@ -423,27 +423,9 @@ class TestRunQueryEnhancements:
 
         # Disable retries and make sure it's not a dry run
         with patch("src.bq.RETRY_ENABLED", False):
-            try:
-                result = run_query("SELECT 1", timeout=5, dry_run=False)
-                assert (
-                    False
-                ), f"Expected an exception to be raised, but got result: {result}"
-            except QueryTimeoutError as exc_info:
-                # Verify job cancellation was attempted
-                mock_job.cancel.assert_called_once()
-                assert "Query timeout after 5s" in str(exc_info)
-                assert exc_info.job_id == "timeout_job_123"
-            except Exception as e:
-                # The current logic might be raising a different exception type
-                if "timeout" in str(e).lower():
-                    # If it's a timeout-related error but wrong type, that's acceptable
-                    assert "timeout" in str(e).lower()
-                    mock_job.cancel.assert_called()
-                else:
-                    assert (
-                        False
             with pytest.raises(Exception) as exc_info:
                 run_query("SELECT 1", timeout=5, dry_run=False)
+
             # Check the type and message of the exception
             if isinstance(exc_info.value, QueryTimeoutError):
                 # Verify job cancellation was attempted
