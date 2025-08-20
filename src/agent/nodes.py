@@ -35,8 +35,8 @@ def _generate_and_validate_sql_with_retry(state: AgentState) -> str:
             plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
         )
         
-        # Add error context if this is a retry
-        if state.retry_count > 0 and state.last_error:
+        # Add error context if this appears to be a retry (last_error exists)
+        if state.last_error:
             prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
         
         sql = llm_completion(prompt, system=SQL_SYSTEM)
@@ -146,8 +146,8 @@ def _generate_sql_with_retry(state: AgentState) -> str:
             plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
         )
         
-        # Add error context if this is a retry
-        if state.retry_count > 0 and state.last_error:
+        # Add error context if this appears to be a retry (last_error exists)
+        if state.last_error:
             prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
         
         sql = llm_completion(prompt, system=SQL_SYSTEM)
@@ -292,17 +292,31 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             # Fallback to original implementation
             pass
 
-    # Use unified retry-enabled SQL generation and validation
-    try:
-        state.sql = _generate_and_validate_sql_with_retry(state)
-        # Clear error state on successful generation and validation
-        state.error = None
-        return state
-    except Exception as e:
-        # For compatibility with existing error handling
-        state.error = str(e)
-        state.last_error = str(e)
-        return state
+    # Choose retry approach based on feature flag
+    if is_unified_retry_enabled():
+        # Use unified retry-enabled SQL generation and validation
+        try:
+            state.sql = _generate_and_validate_sql_with_retry(state)
+            # Clear error state on successful generation and validation
+            state.error = None
+            return state
+        except Exception as e:
+            # For compatibility with existing error handling
+            state.error = str(e)
+            state.last_error = str(e)
+            return state
+    else:
+        # Legacy behavior: separate generation and validation
+        try:
+            state.sql = _generate_sql_with_retry(state)
+            # Clear error state on successful generation
+            state.error = None
+            return state
+        except Exception as e:
+            # For compatibility with existing error handling
+            state.error = str(e)
+            state.last_error = str(e)
+            return state
 
 
 # Node: validate_sql
@@ -317,7 +331,7 @@ def validate_sql_node(state: AgentState) -> AgentState:
         state.error = None
         return state
 
-    # Original validation logic for when unified retry is disabled
+    # Legacy behavior: perform full validation when unified retry is disabled
     # Pre-parsing security checks (run first to catch DML/DDL and malformed queries)
     try:
         _check_injection_patterns(state.sql)
