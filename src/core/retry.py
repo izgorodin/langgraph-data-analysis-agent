@@ -138,6 +138,18 @@ def classify_error(error: Exception) -> ErrorCategory:
     """Classify error to determine retry behavior."""
     error_type = type(error)
     
+    # Special handling for ValueError - check message first before using default classification
+    if error_type == ValueError:
+        error_message = str(error).lower()
+        # SQL validation errors should be business logic, not permanent
+        if any(pattern in error_message for pattern in [
+            'sql parse error', 'query must start', 'forbidden tables', 
+            'invalid sql', 'syntax error', 'missing column'
+        ]):
+            return ErrorCategory.BUSINESS_LOGIC
+        # For other ValueError types, use the default PERMANENT classification
+        return ErrorCategory.PERMANENT
+    
     # Check exact type match first
     if error_type in _ERROR_CLASSIFIERS:
         return _ERROR_CLASSIFIERS[error_type]
@@ -163,10 +175,10 @@ def classify_error(error: Exception) -> ErrorCategory:
     if any(pattern in error_message for pattern in ['timeout', 'connection', 'network error']):
         return ErrorCategory.INFRASTRUCTURE
         
-    # Permanent error patterns
+    # Permanent error patterns (more specific now)
     if any(pattern in error_name for pattern in ['badrequest', 'forbidden', 'notfound', 'unauthorized']):
         return ErrorCategory.PERMANENT
-    if any(pattern in error_message for pattern in ['not found', 'access denied', 'invalid']):
+    if any(pattern in error_message for pattern in ['not found', 'access denied', 'authentication']):
         return ErrorCategory.PERMANENT
         
     # Default to transient for unknown errors
@@ -178,7 +190,12 @@ def should_retry_error(error: Exception, category: Optional[ErrorCategory] = Non
     if category is None:
         category = classify_error(error)
     
-    return category in {ErrorCategory.TRANSIENT, ErrorCategory.RATE_LIMIT, ErrorCategory.INFRASTRUCTURE}
+    return category in {
+        ErrorCategory.TRANSIENT, 
+        ErrorCategory.RATE_LIMIT, 
+        ErrorCategory.INFRASTRUCTURE,
+        ErrorCategory.BUSINESS_LOGIC
+    }
 
 
 T = TypeVar('T')

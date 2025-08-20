@@ -26,6 +26,117 @@ def _set_validation_error(state: AgentState, error_message: str) -> None:
     state.error = error_message
 
 
+def _generate_and_validate_sql_with_retry(state: AgentState) -> str:
+    """Generate and validate SQL with unified retry for both generation and validation failures."""
+    
+    def _attempt_sql_generation_and_validation():
+        # Build prompt with error context for retry
+        prompt = SQL_TEMPLATE.render(
+            plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
+        )
+        
+        # Add error context if this is a retry
+        if state.retry_count > 0 and state.last_error:
+            prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
+        
+        sql = llm_completion(prompt, system=SQL_SYSTEM)
+        cleaned = (sql or "").strip().strip("`")
+        
+        # Remove common LLM prefixes
+        if cleaned.lower().startswith("sql\n"):
+            cleaned = cleaned[4:].strip()
+        elif cleaned.lower().startswith("sql"):
+            cleaned = cleaned[3:].strip()
+        
+        # If the model returned JSON by mistake, fall back to a simple safe SELECT
+        if cleaned.startswith("{"):
+            # Use first table from plan or first allowed table
+            tables = []
+            if state.plan_json and "tables" in state.plan_json:
+                tables = state.plan_json["tables"]
+            if not tables and ALLOWED:
+                tables = list(ALLOWED)
+            first_table = tables[0] if tables else "orders"
+            cleaned = f"SELECT * FROM {first_table} LIMIT 10"
+        
+        # Validate the generated SQL immediately (include validation in retry scope)
+        validated_sql = _validate_sql_internal(cleaned)
+        return validated_sql
+    
+    # Use unified retry if enabled, otherwise fall back to original behavior
+    if is_unified_retry_enabled():
+        
+        @retry_with_strategy(RetryConfig.SQL_GENERATION, context_name="sql_generation")
+        def retryable_sql_generation_and_validation():
+            return _attempt_sql_generation_and_validation()
+        
+        try:
+            return retryable_sql_generation_and_validation()
+        except Exception as e:
+            # The unified retry system handles the actual retries,
+            # but we update state for compatibility with graph-level logic
+            state.last_error = str(e)
+            raise e
+    else:
+        # Original behavior - no automatic retry
+        return _attempt_sql_generation_and_validation()
+
+
+def _validate_sql_internal(sql: str) -> str:
+    """Internal SQL validation that can be called from within retry scope."""
+    # Pre-parsing security checks (run first to catch DML/DDL and malformed queries)
+    _check_injection_patterns(sql)
+    _check_multi_statement(sql)
+    _validate_syntax_strictly(sql)  # Add strict syntax validation
+
+    # Parse SQL
+    parsed = sqlglot.parse_one(sql, read="bigquery")
+
+    # Handle empty/invalid parsed results
+    if parsed is None:
+        raise ValueError("Invalid or empty SQL query")
+
+    # Policy: SELECT only (but allow UNION of SELECT statements)
+    has_aggregation = False
+    if isinstance(parsed, exp.Union):
+        # UNION is acceptable if it contains only SELECT statements
+        # Treat as complex query; no LIMIT injection
+        has_aggregation = True
+    elif not isinstance(parsed, exp.Select):
+        raise ValueError("Only SELECT queries are allowed")
+
+    # Policy: block non-allowed tables
+    tables = {t.name for t in parsed.find_all(exp.Table)}
+
+    # Filter out CTE names - they are virtual tables, not real tables
+    cte_names = set()
+    for cte in parsed.find_all(exp.CTE):
+        if hasattr(cte, "alias") and cte.alias:
+            cte_names.add(str(cte.alias))
+
+    # Remove CTE names from table validation
+    real_tables = tables - cte_names
+
+    if not real_tables.issubset(ALLOWED):
+        forbidden_tables = real_tables - ALLOWED
+        raise ValueError(
+            f"Forbidden tables detected: {', '.join(forbidden_tables)} - potential security violation"
+        )
+
+    # Enhanced aggregation detection for LIMIT injection (unless already set above)
+    if not has_aggregation:
+        has_aggregation = _has_aggregation(parsed)
+
+    # Optional: LIMIT for non-aggregates
+    if not has_aggregation:
+        # enforce LIMIT 1000 if missing
+        if not parsed.args.get("limit"):
+            parsed.set("limit", exp.Limit(this=exp.Literal.number(1000)))
+        sql = parsed.sql(dialect="bigquery")
+
+    return sql
+
+
 def _generate_sql_with_retry(state: AgentState) -> str:
     """Generate SQL with optional unified retry for transient LLM failures."""
     
@@ -181,10 +292,10 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             # Fallback to original implementation
             pass
 
-    # Use unified retry-enabled SQL generation
+    # Use unified retry-enabled SQL generation and validation
     try:
-        state.sql = _generate_sql_with_retry(state)
-        # Clear error state on successful generation
+        state.sql = _generate_and_validate_sql_with_retry(state)
+        # Clear error state on successful generation and validation
         state.error = None
         return state
     except Exception as e:
@@ -199,7 +310,14 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
 def validate_sql_node(state: AgentState) -> AgentState:
     """Enhanced SQL validation with comprehensive security checks."""
+    
+    # If unified retry is enabled, SQL was already validated during generation
+    if is_unified_retry_enabled():
+        # Clear any previous validation errors since SQL passed validation during generation
+        state.error = None
+        return state
 
+    # Original validation logic for when unified retry is disabled
     # Pre-parsing security checks (run first to catch DML/DDL and malformed queries)
     try:
         _check_injection_patterns(state.sql)
