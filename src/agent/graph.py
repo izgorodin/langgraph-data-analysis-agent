@@ -62,9 +62,13 @@ def build_graph():
         def invoke(self, state, *args, **kwargs):
             result = self._inner.invoke(state, *args, **kwargs)
             try:
-                return (
+                final_state = (
                     result if isinstance(result, AgentState) else AgentState(**result)
                 )
+                # LGDA-018: Ensure timing is initialized if not already done
+                if hasattr(final_state, 'pipeline_start_time') and final_state.pipeline_start_time is None:
+                    final_state.start_pipeline_timing()
+                return final_state
             except Exception:
                 return result
 
