@@ -278,9 +278,7 @@ class TestConfigurationConsolidation:
         assert config.job_timeout == 300
 
         # Should be overridable via environment
-        with patch.dict(
-            os.environ, {"LGDA_BQ_QUERY_TIMEOUT": "600"}, clear=True
-        ):
+        with patch.dict(os.environ, {"LGDA_BQ_QUERY_TIMEOUT": "600"}, clear=True):
             new_config = BigQueryConfig()
             assert new_config.query_timeout == 600
 

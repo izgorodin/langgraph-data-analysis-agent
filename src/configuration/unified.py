@@ -38,9 +38,7 @@ class LLMConfig(BaseSettings):
     max_retries: int = Field(default=3, ge=0, le=10)
     retry_delay: float = Field(default=1.0, ge=0.1, le=10.0)
 
-    model_config = SettingsConfigDict(
-        env_prefix="LGDA_LLM_", case_sensitive=False
-    )
+    model_config = SettingsConfigDict(env_prefix="LGDA_LLM_", case_sensitive=False)
 
     def get_max_tokens_for_context(self, context: str) -> int:
         """Get max tokens for specific LLM context."""
@@ -85,9 +83,7 @@ class BigQueryConfig(BaseSettings):
     max_concurrent_queries: int = Field(default=5, ge=1, le=20)
     result_cache_ttl: int = Field(default=1800, ge=60, le=86400)
 
-    model_config = SettingsConfigDict(
-        env_prefix="LGDA_BQ_", case_sensitive=False
-    )
+    model_config = SettingsConfigDict(env_prefix="LGDA_BQ_", case_sensitive=False)
 
 
 class SecurityConfig(BaseSettings):
@@ -120,9 +116,7 @@ class SecurityConfig(BaseSettings):
     # Validation timeouts
     validation_timeout: int = Field(default=5, ge=1, le=30)
 
-    model_config = SettingsConfigDict(
-        env_prefix="LGDA_SECURITY_", case_sensitive=False
-    )
+    model_config = SettingsConfigDict(env_prefix="LGDA_SECURITY_", case_sensitive=False)
 
 
 class PerformanceConfig(BaseSettings):
