@@ -17,6 +17,23 @@ from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
 from .state import AgentState
 
+
+# Чистый error-handler: финальная валидация и маркировка результата
+def error_handler_node(state: AgentState) -> AgentState:
+    """Финальная обработка состояния с ошибкой: сверка отчёта и данных, маркировка результата."""
+    # Если ошибка отсутствует, но лимит ретраев исчерпан и есть last_error — восстанавливаем ошибку
+    if not state.error and state.retry_count >= state.max_retries and state.last_error:
+        state.error = state.last_error
+    if state.error:
+        if state.report and state.df_summary:
+            row_count = state.df_summary.get("row_count")
+            if row_count and str(row_count) in state.report:
+                state.error += " | Report matches data summary (rows)"
+            else:
+                state.error += " | Report does NOT match data summary (rows)"
+    return state
+
+
 ALLOWED = set(settings.allowed_tables)
 
 

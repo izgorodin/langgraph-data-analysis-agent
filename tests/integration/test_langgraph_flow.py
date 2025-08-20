@@ -375,13 +375,32 @@ class TestLangGraphFlow:
         # Should complete without hanging
         assert final_state is not None
 
-        # Error execution - should terminate early on validation error
+        # Scenario 1: Error not fixed after all retries — should terminate with error
+        # ВНИМАНИЕ: Тест намеренно оставлен падающим! Архитектурный долг:
+        # Ошибка не пробрасывается после всех ретраев, требуется исследование и рефакторинг.
+        # См. LGDA-016 (или аналогичную задачу) для дальнейшей работы.
         with patch("src.agent.nodes.validate_sql_node") as mock_validate:
             error_state = AgentState(question="Error test")
             error_state.error = "Validation failed"
+            error_state.retry_count = error_state.max_retries
             mock_validate.return_value = error_state
 
             final_state = app.invoke(error_state)
+            assert (
+                final_state.error is not None
+            ), f"Error should remain after all retries, got: {final_state.error}"
 
-            # Should terminate with error
-            assert final_state.error is not None
+        # Scenario 2: Error fixed on last retry — should terminate without error
+        with patch("src.agent.nodes.validate_sql_node") as mock_validate:
+            success_state = AgentState(question="Success after retry")
+            success_state.error = "Validation failed"
+            success_state.retry_count = success_state.max_retries
+            # Мок возвращает состояние без ошибки, имитируя успешный ретрай
+            fixed_state = AgentState(question="Success after retry")
+            fixed_state.error = None
+            mock_validate.return_value = fixed_state
+
+            final_state = app.invoke(success_state)
+            assert (
+                final_state.error is None
+            ), f"Error should be cleared after successful retry, got: {final_state.error}"

@@ -4,6 +4,7 @@ from langgraph.graph import END, StateGraph
 
 from src.agent.nodes import (
     analyze_df_node,
+    error_handler_node,
     execute_sql_node,
     plan_node,
     report_node,
@@ -100,40 +101,44 @@ def build_graph():
     graph.add_edge("plan", "synthesize_sql")
     graph.add_edge("synthesize_sql", "validate_sql")
 
+    graph.add_node("error_handler", error_handler_node)
+
     def on_valid(state: AgentState):
-        # Proceed when validation passed
         if state.error is None or state.error == "":
-            # Clear any residual error state to ensure clean success
             state.error = None
             state.last_error = None
             return "execute_sql"
-
-        # Check if we should retry SQL generation with unified retry
         if _should_retry_sql_generation(state):
             state.retry_count += 1
-            # Clear current error for retry attempt, but preserve in last_error for context
             state.last_error = state.error
             state.error = None
             return "synthesize_sql"
-
-    # Validation failed и retry не требуется — завершаем граф, error не трогаем
-    # (error уже установлен и будет возвращён в финальном состоянии)
-    return END
+        # Ошибка после всех ретраев — направляем в error_handler
+        return "error_handler"
 
     graph.add_conditional_edges(
         "validate_sql",
         on_valid,
-        {"execute_sql": "execute_sql", "synthesize_sql": "synthesize_sql", END: END},
+        {
+            "execute_sql": "execute_sql",
+            "synthesize_sql": "synthesize_sql",
+            "error_handler": "error_handler",
+        },
     )
 
     def on_exec(state: AgentState):
-        return "analyze_df" if state.error is None else END
+        if state.error is None:
+            return "analyze_df"
+        return "error_handler"
 
     graph.add_conditional_edges(
-        "execute_sql", on_exec, {"analyze_df": "analyze_df", END: END}
+        "execute_sql",
+        on_exec,
+        {"analyze_df": "analyze_df", "error_handler": "error_handler"},
     )
     graph.add_edge("analyze_df", "report")
     graph.add_edge("report", END)
+    graph.add_edge("error_handler", END)
 
     app = graph.compile()
 
