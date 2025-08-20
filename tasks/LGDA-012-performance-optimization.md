@@ -2,13 +2,13 @@
 
 **Priority**: MEDIUM | **Type**: Performance | **Parallel**: Can run with LGDA-007, LGDA-008, LGDA-011
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-006** (Performance Strategy), we need systematic performance optimization including intelligent caching, query optimization, and resource management to ensure production scalability.
 
-## Objective
+## Цель задачи
 Implement comprehensive performance optimization with intelligent caching, query optimization, and resource management to achieve production SLA requirements.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **No caching strategy**: Repeated identical queries execute multiple times
@@ -215,7 +215,19 @@ class ParallelPipelineExecutor:
 - **Uses LGDA-011**: Performance metrics and monitoring integration
 - **Enhances all components**: Performance improvements benefit entire pipeline
 
-## Acceptance Criteria
+## Критерии приемки
+## Возможные сложности
+- Регрессии производительности при оптимизациях
+- Ограничения BigQuery/LLM провайдеров
+- Баланс качества анализа и скорости
+
+## Integration Points
+Работает в связке с LGDA-007 (ретраи), LGDA-008 (конфиг), LGDA-011 (метрики производительности), LGDA-013 (безопасность).
+
+## Безопасность
+- Оптимизация SQL (LIMIT, JOIN order и т.п.) не должна обходить/ослаблять проверки безопасности (см. LGDA-013)
+- Кэширование исключает хранение PII/секретов; внедрить маскирование и строгие TTL
+- Логи/метрики не содержат SQL/секретов; применять маскирование
 
 ### Performance Requirements
 - ✅ 95th percentile response time < 60 seconds for complex queries

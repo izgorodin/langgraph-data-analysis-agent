@@ -2,13 +2,13 @@
 
 **Priority**: MEDIUM | **Type**: Operations | **Parallel**: Can run with all other tasks
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-005** (Observability Strategy), we need comprehensive monitoring for production deployment including performance metrics, error tracking, and business intelligence.
 
-## Objective
+## Цель задачи
 Implement production-grade observability with metrics, logging, tracing, and alerting to ensure system reliability and provide operational insights.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **No observability**: Zero visibility into production performance
@@ -190,7 +190,14 @@ class BusinessMetrics:
 - **Integrates with all tasks**: Metrics for retry (LGDA-007), config (LGDA-008), errors (LGDA-009), tests (LGDA-010)
 - **Foundation for operations**: Enables production deployment confidence
 
-## Acceptance Criteria
+## Критерии приемки
+## Возможные сложности
+- Нагрузка от метрик/трейсинга и влияние на производительность
+- Хранение и ретеншн метрик/логов
+- Совместимость с разными бэкендами (Prometheus/Otel)
+
+## Integration Points
+Кросс‑компонентная интеграция: LGDA-007/009 (ретраи/ошибки), LGDA-008 (конфиг), LGDA-010 (покрытие тестов метриками).
 
 ### Monitoring Requirements
 - ✅ 100% pipeline coverage with metrics and tracing

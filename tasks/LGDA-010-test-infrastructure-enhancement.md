@@ -2,13 +2,13 @@
 
 **Priority**: MEDIUM | **Type**: Quality | **Parallel**: Can run with LGDA-007, LGDA-008, LGDA-009
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-004** (Test Strategy), we need comprehensive test coverage for production deployment, including integration tests with real services and performance validation.
 
-## Objective
+## Цель задачи
 Build comprehensive test infrastructure supporting TDD development, integration testing with real services, performance validation, and production deployment confidence.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **Low test coverage**: 0% coverage on main business logic
@@ -152,7 +152,14 @@ class TestPerformanceRequirements:
 - **Independent**: Core test infrastructure is standalone
 - **Enables future**: Foundation for LGDA-011 (monitoring) testing
 
-## Acceptance Criteria
+## Критерии приемки
+## Возможные сложности
+- Детерминизм и стабильность тестов под нагрузкой
+- Стоимость интеграционных тестов с реальными сервисами
+- Поддержка версий Python и кросс-платформенность CI
+
+## Integration Points
+Зависит от LGDA-008 (единая конфигурация), покрывает LGDA-007/009 сценарии, интегрируется с LGDA-011 (метрики тестов).
 
 ### Coverage Requirements
 - ✅ Unit test coverage > 90% on business logic
