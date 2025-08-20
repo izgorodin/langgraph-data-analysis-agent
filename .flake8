@@ -1,0 +1,28 @@
+[flake8]
+max-line-length = 240
+extend-ignore = E203,W503
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    .venv,
+    .eggs,
+    *.egg
+per-file-ignores =
+    # Tests: long lines, unused imports/vars, undefined names in mocks, placeholder f-strings
+    tests/*: E501,F401,F841,F821,F541,
+    # Re-export pattern
+    src/llm/providers/__init__.py: F401,
+    # Optional imports + local temp vars for instrumentation
+    src/observability/instrumented_nodes.py: F401,F841,
+    # Intentional import for type registration
+    src/llm/cost_tracker.py: F401,
+    # Optional typing import not always needed
+    src/observability/health.py: F401,
+    # Settings import used for side effects/registration
+    src/llm/providers/nvidia_openai.py: F401,
+    # Validator imports kept for compatibility signals
+    src/llm/validator.py: F401,
+    # Legacy bridge keeps AgentState import for type checking/mypy but may be unused at runtime
+    src/agent/llm_integration.py: F401,

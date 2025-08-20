@@ -2,13 +2,13 @@
 
 **Priority**: HIGH | **Type**: Reliability | **Parallel**: Can run with LGDA-007, LGDA-008
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-003** (Error Handling Strategy), we need to eliminate hanging processes, provide proper error recovery, and ensure production-grade reliability.
 
-## Objective
+## Цель задачи
 Implement comprehensive error handling with graceful degradation, prevent hanging processes, and provide actionable error messages for both users and developers.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **Hanging processes**: System hangs on BigQuery Array null element errors
@@ -142,7 +142,19 @@ class BigQueryErrorHandler:
 - **Uses LGDA-008**: Error configuration management
 - **Independent**: Core error handling logic is standalone
 
-## Acceptance Criteria
+## Критерии приемки
+## Возможные сложности
+- Точность классификации ошибок и выбор корректной стратегии
+- Риск ложных срабатываний circuit breaker
+- Баланс UX и скорости восстановления
+
+## Integration Points
+Взаимодействует с LGDA-007 (ретраи), LGDA-008 (конфигурация), LGDA-011 (обсервабилити).
+
+## Безопасность
+- Security-ошибки (валидация SQL, доступы, PII) считаются постоянными и не ретраятся
+- Сообщения об ошибках и логи санитизируются: исключить SQL/секреты/PII
+- Инциденты безопасности фиксируются в аудите (LGDA-013), настройка алертов
 
 ### Reliability Requirements
 - ✅ Zero hanging processes under any error condition

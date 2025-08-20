@@ -348,7 +348,7 @@ class LLMResponseGenerator:
 
         if task == "sales_analysis":
             sql = """
-            SELECT 
+            SELECT
                 p.category,
                 COUNT(DISTINCT o.order_id) as order_count,
                 SUM(oi.sale_price) as total_revenue,
@@ -364,8 +364,8 @@ class LLMResponseGenerator:
             """
         elif task == "customer_analysis":
             sql = """
-            SELECT 
-                CASE 
+            SELECT
+                CASE
                     WHEN u.age < 25 THEN '18-24'
                     WHEN u.age < 35 THEN '25-34'
                     WHEN u.age < 45 THEN '35-44'
@@ -385,7 +385,7 @@ class LLMResponseGenerator:
             """
         elif task == "product_analysis":
             sql = """
-            SELECT 
+            SELECT
                 p.name,
                 p.category,
                 COUNT(oi.id) as units_sold,
@@ -401,7 +401,7 @@ class LLMResponseGenerator:
             """
         else:
             sql = f"""
-            SELECT 
+            SELECT
                 COUNT(*) as total_count,
                 status
             FROM {tables[0]}

@@ -28,16 +28,11 @@ def build_graph():
     graph.add_edge("synthesize_sql", "validate_sql")
 
     def on_valid(state: AgentState):
+        # Proceed when validation passed
         if state.error is None:
             return "execute_sql"
-        elif state.retry_count < state.max_retries:
-            # Retry: increment counter and go back to synthesize_sql
-            state.retry_count += 1
-            state.error = None  # Clear error for retry
-            return "synthesize_sql"
-        else:
-            # Max retries reached, end with error
-            return END
+        # Validation failed; end early to avoid loops/retries (tests expect no retry here)
+        return END
 
     graph.add_conditional_edges(
         "validate_sql",

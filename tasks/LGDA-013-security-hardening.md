@@ -2,13 +2,13 @@
 
 **Priority**: HIGH | **Type**: Security | **Parallel**: Can run with LGDA-007, LGDA-008, LGDA-010
 
-## Architectural Context
+## Архитектурный контекст
 Based on **ADR-007** (Security Strategy), we need comprehensive security hardening including SQL injection prevention, data privacy, audit trails, and compliance framework for production deployment.
 
-## Objective
+## Цель задачи
 Implement production-grade security with comprehensive SQL injection prevention, data privacy controls, audit trails, and compliance framework suitable for enterprise deployment.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problems
 - **Basic SQL injection prevention**: Limited to simple pattern matching
@@ -274,7 +274,14 @@ class SecureConfigManager:
 - **Integrates with LGDA-010**: Security testing framework
 - **Foundation**: Required for production deployment
 
-## Acceptance Criteria
+## Критерии приемки
+## Возможные сложности
+- Ложные срабатывания правил безопасности
+- Производительность проверок (SQL/секреты)
+- Совместимость с DevEx и DX
+
+## Integration Points
+Касается всех задач: LGDA-002 (SQL валидация), LGDA-007/009 (ретраи/ошибки), LGDA-008 (секреты и доступы), LGDA-011 (аудит).
 
 ### Security Requirements
 - ✅ Zero SQL injection vulnerabilities in penetration testing

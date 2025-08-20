@@ -22,12 +22,14 @@ from src.config import settings
 console = Console()
 
 
-class TimeoutError(Exception):
+class CLITimeoutError(Exception):
+    """Internal timeout error to avoid shadowing built-in TimeoutError."""
+
     pass
 
 
 def timeout_handler(signum, frame):
-    raise TimeoutError("Operation timed out")
+    raise CLITimeoutError("Operation timed out")
 
 
 @click.command()
@@ -75,37 +77,43 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
                         f"[cyan]Step {step_counter}/{total_steps}: {node}[/cyan]",
                         end=" ",
                     )
-                    if hasattr(s, "error") and s.error:
-                        console.print(f"[red]✗ Error: {s.error[:50]}...[/red]")
+                    if hasattr(s, "error") and getattr(s, "error"):
+                        console.print(
+                            f"[red]✗ Error: {getattr(s, 'error')[:50]}...[/red]"
+                        )
                     else:
-                        console.print(f"[green]✓[/green]")
+                        console.print("[green]✓[/green]")
 
-                # Always capture the latest state
-                if isinstance(s, dict):
-                    final = AgentState(**s)
-                elif hasattr(s, "model_dump"):
-                    final = s
-
+                # For verbose output, pretty-print the payload only; don't coerce to AgentState
                 if verbose:
-                    console.rule(f"[bold cyan]{node}")
-                    # Ensure payload is a dict and then truncate the string form
-                    if not isinstance(s, dict):
-                        try:
-                            s = s.model_dump()
-                        except Exception:
-                            s = {"value": str(s)}
-                    payload_str = json.dumps(s, ensure_ascii=False)
-                    # Print via print_json first, then show a truncated raw preview if extremely long
-                    if len(payload_str) <= 6000:
-                        console.print_json(payload_str)
-                    else:
-                        console.print_json(payload_str)
+                    try:
+                        console.rule(f"[bold cyan]{node}")
+                        payload = s
+                        if not isinstance(payload, dict):
+                            try:
+                                payload = payload.model_dump()
+                            except Exception:
+                                payload = {"value": str(payload)}
+                        payload_str = json.dumps(payload, ensure_ascii=False)
+                        # Print JSON safely: use print_json only if valid and short; otherwise fallback to plain text
+                        if len(payload_str) <= 6000:
+                            try:
+                                console.print_json(payload_str)
+                            except Exception:
+                                console.print(payload_str)
+                        else:
+                            console.print(payload_str[:6000] + "… [truncated]")
+                    except Exception:
+                        # Ensure one bad payload doesn't crash the CLI
+                        console.print(
+                            f"[yellow]Warning:[/yellow] failed to render node '{node}' output"
+                        )
 
         # If no final state captured from stream, invoke once
         if final is None:
             final = app.invoke(state)
 
-    except TimeoutError:
+    except CLITimeoutError as exc:
         console.rule("[bold red]Timeout")
         console.print(
             Panel.fit(
@@ -113,7 +121,9 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
                 title="Execution timeout",
             )
         )
-        raise click.ClickException(f"Operation timed out after {timeout} seconds")
+        raise click.ClickException(
+            f"Operation timed out after {timeout} seconds"
+        ) from exc
     except Exception as e:
         console.rule("[bold red]Error")
         console.print(Panel.fit(str(e), title="Execution failed"))
@@ -124,7 +134,6 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
         signal.alarm(0)
 
     console.rule("[bold green]Insight")
-    console.print(Panel.fit(final.report or "No report", title="Agent Report"))
     console.print(Panel.fit(final.report or "No report", title="Agent Report"))
 
 

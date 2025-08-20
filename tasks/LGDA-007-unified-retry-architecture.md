@@ -2,13 +2,13 @@
 
 **Priority**: HIGH | **Type**: Architecture | **Parallel**: Can run with LGDA-008, LGDA-009
 
-## Architectural Context
-Based on **ADR-001** (Unified Retry Architecture), we need to consolidate the dual retry logic currently scattered between `bq.py` and LangGraph retry mechanism.
+## Архитектурный контекст
+На базе ADR-001 (Unified Retry Architecture) необходимо консолидировать двойную ретрай-логику, которая сейчас разбросана между `bq.py` и механизмом ретраев в LangGraph.
 
-## Objective
-Implement a centralized, configurable retry system that eliminates duplicate retry logic and provides consistent error handling across all components.
+## Цель задачи
+Реализовать централизованную настраиваемую систему ретраев, которая устраняет дублирование логики и обеспечивает единообразную обработку ошибок во всех компонентах.
 
-## Detailed Analysis
+## Детальный анализ
 
 ### Current Problem
 - **Dual retry systems**: `bq.py` has exponential backoff retry, LangGraph has SQL validation retry
@@ -66,7 +66,7 @@ async def retry_sql_generation(state: AgentState, error_context: str) -> str:
 - **Before**: LGDA-008 (Configuration Management) can run in parallel
 - **Parallel with**: LGDA-009 (Error Handling), LGDA-010 (Test Infrastructure)
 
-## Acceptance Criteria
+## Критерии приемки
 
 ### Functional Requirements
 - ✅ Single retry system handles all retry scenarios
@@ -93,6 +93,18 @@ def test_circuit_breaker_prevents_retry_storms():
 def test_retry_context_preservation():
     """Error context accumulates across retry attempts"""
 ```
+
+## Возможные сложности
+- Конфликт стратегий ретраев между LangGraph и BigQuery
+- Классификация постоянных vs временных ошибок (false positive/negative)
+- Тюнинг backoff и jitter без деградации UX и времени ответа
+- Корректная отмена задач, очистка состояния и предотвращение утечек ресурсов
+- Предотвращение retry storm; координация с circuit breaker и лимитами провайдеров
+
+## Integration Points
+Взаимодействует с LGDA-008 (единая конфигурация ретраев), LGDA-009 (классификация ошибок и стратегии восстановления),
+LGDA-011 (метрики/трейсинг ретраев, алерты), LGDA-012 (ограничение конкуренции и ресурс-менеджмент).
+Также учесть безопасность (LGDA-013): security-ошибки классифицируются как постоянные (без ретраев), исключить утечки секретов в логах.
 
 ## Rollback Plan
 1. Feature flag: `LGDA_USE_UNIFIED_RETRY=false`
