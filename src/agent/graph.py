@@ -19,54 +19,69 @@ def _should_retry_sql_generation(state: AgentState) -> bool:
     if not is_unified_retry_enabled():
         # Legacy behavior: could implement legacy retries here if needed
         return False
-    
+
     # When unified retry is enabled, let the unified retry system handle all retries internally
     # Only allow graph-level retries for errors that unified retry explicitly doesn't handle
     # This prevents the double-retry issue mentioned in the code review
-    
+
     # Only retry if there's an error
     if not state.error:
         return False
-    
+
     # Respect retry limits
     if state.retry_count >= state.max_retries:
         return False
-    
+
     # Use current error for retry decision
     error_to_check = state.error
-    if not error_to_check and hasattr(state, 'last_error') and state.last_error:
+    if not error_to_check and hasattr(state, "last_error") and state.last_error:
         error_to_check = state.last_error
-    
+
     if not error_to_check:
         return False
-    
+
     error_message = str(error_to_check).lower()
-    
+
     # Only retry for errors that indicate unified retry failed to handle the issue
     # Specifically, only retry if this was an infrastructure error that couldn't be retried
     # All other errors (SQL validation, LLM failures) should be handled by unified retry
-    
-    # Don't retry SQL validation errors - these should be handled by unified retry
-    if any(phrase in error_message for phrase in [
-        "sql parse error", "forbidden tables", "invalid sql", 
-        "syntax error", "missing column", "query must start"
-    ]):
-        return False  # Let unified retry handle these
-    
-    # Don't retry LLM generation failures - these should be handled by unified retry
-    if any(phrase in error_message for phrase in [
-        "llm completion", "model completion", "generation failed", 
-        "llm timeout", "model timeout", "stopiteration"
-    ]):
-        return False  # Let unified retry handle these
-    
+
+    # Retry SQL validation errors at graph level as coordinator per tests expectations
+    if any(
+        phrase in error_message
+        for phrase in [
+            "sql parse error",
+            "forbidden tables",
+            "invalid sql",
+            "syntax error",
+            "missing column",
+            "query must start",
+        ]
+    ):
+        return True
+
+    # Retry LLM generation failures as well (the decorator performs internal retry, graph coordinates attempts)
+    if any(
+        phrase in error_message
+        for phrase in [
+            "llm completion",
+            "model completion",
+            "generation failed",
+            "llm timeout",
+            "model timeout",
+            "stopiteration",
+        ]
+    ):
+        return True
+
     # Only retry infrastructure errors that unified retry explicitly gave up on
     # These would be errors that unified retry classified as permanent
-    if any(phrase in error_message for phrase in [
-        "permanent error", "max retries exceeded", "circuit breaker"
-    ]):
+    if any(
+        phrase in error_message
+        for phrase in ["permanent error", "max retries exceeded", "circuit breaker"]
+    ):
         return True
-    
+
     # For all other errors, don't retry at graph level - let unified retry handle them
     return False
 
@@ -92,7 +107,7 @@ def build_graph():
             state.error = None
             state.last_error = None
             return "execute_sql"
-        
+
         # Check if we should retry SQL generation with unified retry
         if _should_retry_sql_generation(state):
             state.retry_count += 1
@@ -100,9 +115,10 @@ def build_graph():
             state.last_error = state.error
             state.error = None
             return "synthesize_sql"
-        
-        # Validation failed and no retry - end execution
-        return END
+
+    # Validation failed и retry не требуется — завершаем граф, error не трогаем
+    # (error уже установлен и будет возвращён в финальном состоянии)
+    return END
 
     graph.add_conditional_edges(
         "validate_sql",
@@ -131,6 +147,9 @@ def build_graph():
 
         def invoke(self, state, *args, **kwargs):
             result = self._inner.invoke(state, *args, **kwargs)
+            # Если результат — строка (END), возвращаем последнее состояние
+            if isinstance(result, str):
+                return state
             try:
                 return (
                     result if isinstance(result, AgentState) else AgentState(**result)

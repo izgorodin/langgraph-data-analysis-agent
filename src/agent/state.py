@@ -18,3 +18,6 @@ class AgentState(BaseModel):
     retry_count: int = 0
     max_retries: int = 2
     last_error: Optional[str] = None
+
+    # SQL validation flag
+    sql_validated: bool = False

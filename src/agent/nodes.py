@@ -11,7 +11,7 @@ from sqlglot import exp
 from ..bq import get_schema, run_query
 from ..config import settings
 from ..core.migration import is_unified_retry_enabled
-from ..core.retry import retry_with_strategy, RetryConfig, ErrorCategory, classify_error
+from ..core.retry import RetryConfig, retry_with_strategy
 from ..llm import llm_completion
 from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
@@ -28,26 +28,26 @@ def _set_validation_error(state: AgentState, error_message: str) -> None:
 
 def _generate_and_validate_sql_with_retry(state: AgentState) -> str:
     """Generate and validate SQL with unified retry for both generation and validation failures."""
-    
+
     def _attempt_sql_generation_and_validation():
         # Build prompt with error context for retry
         prompt = SQL_TEMPLATE.render(
             plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
         )
-        
+
         # Add error context if this appears to be a retry (last_error exists)
         if state.last_error:
             prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
-        
+
         sql = llm_completion(prompt, system=SQL_SYSTEM)
         cleaned = (sql or "").strip().strip("`")
-        
+
         # Remove common LLM prefixes
         if cleaned.lower().startswith("sql\n"):
             cleaned = cleaned[4:].strip()
         elif cleaned.lower().startswith("sql"):
             cleaned = cleaned[3:].strip()
-        
+
         # If the model returned JSON by mistake, fall back to a simple safe SELECT
         if cleaned.startswith("{"):
             # Use first table from plan or first allowed table
@@ -58,18 +58,18 @@ def _generate_and_validate_sql_with_retry(state: AgentState) -> str:
                 tables = list(ALLOWED)
             first_table = tables[0] if tables else "orders"
             cleaned = f"SELECT * FROM {first_table} LIMIT 10"
-        
+
         # Validate the generated SQL immediately (include validation in retry scope)
         validated_sql = _validate_sql_internal(cleaned)
         return validated_sql
-    
+
     # Use unified retry if enabled, otherwise fall back to original behavior
     if is_unified_retry_enabled():
-        
+
         @retry_with_strategy(RetryConfig.SQL_GENERATION, context_name="sql_generation")
         def retryable_sql_generation_and_validation():
             return _attempt_sql_generation_and_validation()
-        
+
         try:
             return retryable_sql_generation_and_validation()
         except Exception as e:
@@ -139,26 +139,26 @@ def _validate_sql_internal(sql: str) -> str:
 
 def _generate_sql_with_retry(state: AgentState) -> str:
     """Generate SQL with optional unified retry for transient LLM failures."""
-    
+
     def _attempt_sql_generation():
         # Build prompt with error context for retry
         prompt = SQL_TEMPLATE.render(
             plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
         )
-        
+
         # Add error context if this appears to be a retry (last_error exists)
         if state.last_error:
             prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
-        
+
         sql = llm_completion(prompt, system=SQL_SYSTEM)
         cleaned = (sql or "").strip().strip("`")
-        
+
         # Remove common LLM prefixes
         if cleaned.lower().startswith("sql\n"):
             cleaned = cleaned[4:].strip()
         elif cleaned.lower().startswith("sql"):
             cleaned = cleaned[3:].strip()
-        
+
         # If the model returned JSON by mistake, fall back to a simple safe SELECT
         if cleaned.startswith("{"):
             # Use first table from plan or first allowed table
@@ -169,16 +169,16 @@ def _generate_sql_with_retry(state: AgentState) -> str:
                 tables = list(ALLOWED)
             first_table = tables[0] if tables else "orders"
             cleaned = f"SELECT * FROM {first_table} LIMIT 10"
-            
+
         return cleaned
-    
+
     # Use unified retry if enabled, otherwise fall back to original behavior
     if is_unified_retry_enabled():
-        
+
         @retry_with_strategy(RetryConfig.SQL_GENERATION, context_name="sql_generation")
         def retryable_sql_generation():
             return _attempt_sql_generation()
-        
+
         try:
             return retryable_sql_generation()
         except Exception as e:
@@ -299,6 +299,8 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             state.sql = _generate_and_validate_sql_with_retry(state)
             # Clear error state on successful generation and validation
             state.error = None
+            # Mark that SQL has already passed validation in unified path
+            setattr(state, "sql_validated", True)
             return state
         except Exception as e:
             # For compatibility with existing error handling
@@ -324,9 +326,14 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
 def validate_sql_node(state: AgentState) -> AgentState:
     """Enhanced SQL validation with comprehensive security checks."""
-    
-    # If unified retry is enabled, SQL was already validated during generation
-    if is_unified_retry_enabled():
+
+    # Если ошибка уже есть, не трогаем состояние — граф завершит выполнение с ошибкой
+    if state.error:
+        return state
+
+    # If unified retry is enabled, SQL may have been validated during generation.
+    # Only skip validation when we have an explicit marker from synthesize step.
+    if is_unified_retry_enabled() and getattr(state, "sql_validated", False):
         # Clear any previous validation errors since SQL passed validation during generation
         state.error = None
         return state
@@ -396,8 +403,10 @@ def validate_sql_node(state: AgentState) -> AgentState:
 
     # Clear any previous validation errors since validation passed
     state.error = None
+    # Mark SQL as validated for downstream nodes
+    setattr(state, "sql_validated", True)
     # Don't clear last_error here as it might be needed for retry context
-    
+
     return state
 
 
@@ -624,10 +633,10 @@ def execute_sql_node(state: AgentState) -> AgentState:
         "describe": json.loads(df_for_summary.describe(include="all").to_json()),
     }
     state.df_summary = summary
-    
+
     # Clear error state on successful execution
     state.error = None
-    
+
     return state
 
 
