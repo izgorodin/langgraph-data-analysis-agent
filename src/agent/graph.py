@@ -4,6 +4,7 @@ from langgraph.graph import END, StateGraph
 
 from src.agent.nodes import (
     analyze_df_node,
+    error_handler_node,
     execute_sql_node,
     plan_node,
     report_node,
@@ -21,6 +22,7 @@ def build_graph():
     graph.add_node("execute_sql", execute_sql_node)
     graph.add_node("analyze_df", analyze_df_node)
     graph.add_node("report", report_node)
+    graph.add_node("error_handler", error_handler_node)
 
     graph.set_entry_point("plan")
 
@@ -31,23 +33,30 @@ def build_graph():
         # Proceed when validation passed
         if state.error is None:
             return "execute_sql"
-        # Validation failed; end early to avoid loops/retries (tests expect no retry here)
-        return END
+            
+        # Validation failed - check if we can retry
+        if state.retry_count < state.max_retries:
+            # Go back to synthesize_sql for retry
+            return "synthesize_sql"
+        else:
+            # Retries exhausted - go to error handler
+            return "error_handler"
 
     graph.add_conditional_edges(
         "validate_sql",
         on_valid,
-        {"execute_sql": "execute_sql", "synthesize_sql": "synthesize_sql", END: END},
+        {"execute_sql": "execute_sql", "synthesize_sql": "synthesize_sql", "error_handler": "error_handler"},
     )
 
     def on_exec(state: AgentState):
-        return "analyze_df" if state.error is None else END
+        return "analyze_df" if state.error is None else "error_handler"
 
     graph.add_conditional_edges(
-        "execute_sql", on_exec, {"analyze_df": "analyze_df", END: END}
+        "execute_sql", on_exec, {"analyze_df": "analyze_df", "error_handler": "error_handler"}
     )
     graph.add_edge("analyze_df", "report")
     graph.add_edge("report", END)
+    graph.add_edge("error_handler", END)
 
     app = graph.compile()
 
