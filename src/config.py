@@ -123,6 +123,11 @@ class LGDAConfig(BaseSettings):
         validation_alias=AliasChoices("LGDA_ALLOWED_TABLES", "ALLOWED_TABLES"),
     )
 
+    # Error handling policies
+    strict_no_fake_report: bool = Field(
+        default=True, validation_alias="LGDA_STRICT_NO_FAKE_REPORT"
+    )
+
     # Observability configuration
     observability_enabled: bool = Field(
         default=True, validation_alias="LGDA_OBSERVABILITY_ENABLED"
