@@ -114,6 +114,31 @@ def plan_node(state: AgentState) -> AgentState:
 
 
 def synthesize_sql_node(state: AgentState) -> AgentState:
+    """
+    Generate SQL based on the plan, handling retry logic and state management.
+
+    This function generates SQL from the provided plan, manages retry attempts by
+    updating error context and retry count in the state, and supports enhanced LLM
+    integration with fallback to the original implementation. It updates the state
+    object with the generated SQL and relevant error/retry information.
+    """
+    # Check if we're retrying - if so, increment retry count and set up error context
+    if state.error is not None:
+        state.retry_count += 1
+        state.last_error = state.error
+        state.error = None  # Clear current error for retry
+def _handle_retry_state(state: AgentState) -> None:
+    """Update retry state if an error is present."""
+    if state.error is not None:
+        state.retry_count += 1
+        state.last_error = state.error
+        state.error = None  # Clear current error for retry
+
+
+def synthesize_sql_node(state: AgentState) -> AgentState:
+    """Generate SQL based on the plan."""
+    # Handle retry state if needed
+    _handle_retry_state(state)
     # Option to use enhanced LLM integration
     if hasattr(state, "use_enhanced_llm") and state.use_enhanced_llm:
         try:
@@ -535,4 +560,29 @@ def report_node(state: AgentState) -> AgentState:
     prompt = f"Question: {state.question}\nPLAN: {plan}\nDF SUMMARY (truncated): {summary}\nWrite a concise executive insight with numeric evidence and 1–2 next questions."
     text = llm_completion(prompt, system=REPORT_SYSTEM)
     state.report = text.strip()
+    return state
+
+
+def error_handler_node(state: AgentState) -> AgentState:
+    """Handle final error state when retries are exhausted."""
+    logger.warning(
+        "error_handler_node: All retries exhausted, preserving error state",
+        extra={
+            "retry_count": state.retry_count,
+            "max_retries": state.max_retries,
+            "error": state.error,
+            "last_error": state.last_error,
+            "node": "error_handler"
+        }
+    )
+    
+    # Ensure error is preserved in final state
+    if state.error is None and state.last_error is not None:
+        # Restore error from last_error if somehow lost
+        state.error = state.last_error
+        logger.warning(
+            "error_handler_node: Restored error from last_error",
+            extra={"restored_error": state.error}
+        )
+    
     return state
