@@ -114,7 +114,14 @@ def plan_node(state: AgentState) -> AgentState:
 
 
 def synthesize_sql_node(state: AgentState) -> AgentState:
-    """Generate SQL based on the plan."""
+    """
+    Generate SQL based on the plan, handling retry logic and state management.
+
+    This function generates SQL from the provided plan, manages retry attempts by
+    updating error context and retry count in the state, and supports enhanced LLM
+    integration with fallback to the original implementation. It updates the state
+    object with the generated SQL and relevant error/retry information.
+    """
     # Check if we're retrying - if so, increment retry count and set up error context
     if state.error is not None:
         state.retry_count += 1
