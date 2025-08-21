@@ -127,7 +127,18 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
         state.retry_count += 1
         state.last_error = state.error
         state.error = None  # Clear current error for retry
+def _handle_retry_state(state: AgentState) -> None:
+    """Update retry state if an error is present."""
+    if state.error is not None:
+        state.retry_count += 1
+        state.last_error = state.error
+        state.error = None  # Clear current error for retry
 
+
+def synthesize_sql_node(state: AgentState) -> AgentState:
+    """Generate SQL based on the plan."""
+    # Handle retry state if needed
+    _handle_retry_state(state)
     # Option to use enhanced LLM integration
     if hasattr(state, "use_enhanced_llm") and state.use_enhanced_llm:
         try:
