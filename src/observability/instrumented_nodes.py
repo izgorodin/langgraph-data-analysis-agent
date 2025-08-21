@@ -13,12 +13,12 @@ from functools import wraps
 from typing import Any, Dict, Optional
 
 from ..agent.nodes import (
-    analyze_df,
-    execute_sql,
-    plan,
-    report,
-    synthesize_sql,
-    validate_sql,
+    analyze_df_node as analyze_df,
+    execute_sql_node as execute_sql,
+    plan_node as plan,
+    report_node as report,
+    synthesize_sql_node as synthesize_sql,
+    validate_sql_node as validate_sql,
 )
 from ..agent.state import AgentState
 from .business_metrics import QueryComplexity, get_business_metrics
@@ -35,7 +35,7 @@ def instrument_node(node_name: str):
 
     def decorator(func):
         @wraps(func)
-        async def wrapper(state: AgentState) -> AgentState:
+        def wrapper(state: AgentState) -> AgentState:
             # Get observability components
             metrics = get_metrics()
             lgda_logger = get_logger()
@@ -56,11 +56,14 @@ def instrument_node(node_name: str):
                     session_id=getattr(state, "session_id", None),
                 ):
                     try:
-                        # Execute the original node function
-                        result = await func(state)
+                        # Execute the original node function (synchronous)
+                        result = func(state)
 
                         # Calculate metrics
                         duration = time.time() - start_time
+
+                        # LGDA-018: Record timing in state for aggregation
+                        result.record_node_timing(node_name, duration)
 
                         # Record success metrics
                         metrics.record_pipeline_stage(node_name, duration)
@@ -68,7 +71,7 @@ def instrument_node(node_name: str):
                             node_name, duration, True
                         )
 
-                        # Log successful execution
+                        # Log successful execution with timing
                         lgda_logger.log_pipeline_stage(
                             node_name,
                             duration,
@@ -79,6 +82,7 @@ def instrument_node(node_name: str):
 
                         # Add span attributes
                         span.set_attribute("success", True)
+                        span.set_attribute("duration_ms", int(duration * 1000))
                         span.set_attribute("output_size", _estimate_state_size(result))
 
                         return result
@@ -87,6 +91,9 @@ def instrument_node(node_name: str):
                         # Calculate metrics for failure
                         duration = time.time() - start_time
                         error_type = type(e).__name__
+
+                        # LGDA-018: Record timing even for failed nodes
+                        state.record_node_timing(node_name, duration)
 
                         # Record error metrics
                         metrics.record_pipeline_stage(node_name, duration, error_type)
@@ -109,6 +116,7 @@ def instrument_node(node_name: str):
                         # Add span error info
                         span.record_exception(e)
                         span.set_attribute("success", False)
+                        span.set_attribute("duration_ms", int(duration * 1000))
                         span.set_attribute("error_type", error_type)
 
                         # Re-raise the exception
@@ -160,10 +168,13 @@ def _determine_query_complexity(question: str, sql: str = "") -> QueryComplexity
 
 # Instrumented node functions
 @instrument_node("plan")
-async def instrumented_plan(state: AgentState) -> AgentState:
+def instrumented_plan(state: AgentState) -> AgentState:
     """Instrumented planning node."""
     lgda_logger = get_logger()
     business_metrics = get_business_metrics()
+
+    # LGDA-018: Initialize pipeline timing at the start
+    state.start_pipeline_timing()
 
     # Log the incoming question
     lgda_logger.log_audit_trail(
@@ -181,11 +192,11 @@ async def instrumented_plan(state: AgentState) -> AgentState:
         session_id=getattr(state, "session_id", None),
     )
 
-    return await plan(state)
+    return plan(state)
 
 
 @instrument_node("synthesize_sql")
-async def instrumented_synthesize_sql(state: AgentState) -> AgentState:
+def instrumented_synthesize_sql(state: AgentState) -> AgentState:
     """Instrumented SQL synthesis node."""
     lgda_logger = get_logger()
 
@@ -196,11 +207,11 @@ async def instrumented_synthesize_sql(state: AgentState) -> AgentState:
         prompt_length=len(state.plan_json.get("task", "")) if state.plan_json else 0,
     )
 
-    return await synthesize_sql(state)
+    return synthesize_sql(state)
 
 
 @instrument_node("validate_sql")
-async def instrumented_validate_sql(state: AgentState) -> AgentState:
+def instrumented_validate_sql(state: AgentState) -> AgentState:
     """Instrumented SQL validation node."""
     lgda_logger = get_logger()
 
@@ -213,11 +224,11 @@ async def instrumented_validate_sql(state: AgentState) -> AgentState:
         },
     )
 
-    return await validate_sql(state)
+    return validate_sql(state)
 
 
 @instrument_node("execute_sql")
-async def instrumented_execute_sql(state: AgentState) -> AgentState:
+def instrumented_execute_sql(state: AgentState) -> AgentState:
     """Instrumented SQL execution node."""
     metrics = get_metrics()
     lgda_logger = get_logger()
@@ -229,7 +240,7 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
         "execute_query", sql_length=len(state.sql) if state.sql else 0
     ) as span:
 
-        result = await execute_sql(state)
+        result = execute_sql(state)
 
         # Extract execution details from result
         success = not bool(state.error)
@@ -273,7 +284,7 @@ async def instrumented_execute_sql(state: AgentState) -> AgentState:
 
 
 @instrument_node("analyze_df")
-async def instrumented_analyze_df(state: AgentState) -> AgentState:
+def instrumented_analyze_df(state: AgentState) -> AgentState:
     """Instrumented data analysis node."""
     lgda_logger = get_logger()
 
@@ -289,17 +300,17 @@ async def instrumented_analyze_df(state: AgentState) -> AgentState:
             },
         )
 
-    return await analyze_df(state)
+    return analyze_df(state)
 
 
 @instrument_node("report")
-async def instrumented_report(state: AgentState) -> AgentState:
+def instrumented_report(state: AgentState) -> AgentState:
     """Instrumented report generation node."""
     metrics = get_metrics()
     lgda_logger = get_logger()
     business_metrics = get_business_metrics()
 
-    result = await report(state)
+    result = report(state)
 
     # Track insight generation
     if result.report:
@@ -322,6 +333,22 @@ async def instrumented_report(state: AgentState) -> AgentState:
                 "has_summary": str(bool(getattr(state, "df_summary", None))),
             },
         )
+
+    # LGDA-018: Generate and log final timing summary
+    timing_summary = result.get_timing_summary()
+    if timing_summary["node_count"] > 0:
+        lgda_logger.log_performance_metric(
+            operation="pipeline_execution",
+            duration=timing_summary.get("total_duration", 0),
+            resource_usage={
+                "node_timings": timing_summary["pipeline_timing"],
+                "total_nodes": timing_summary["node_count"],
+                "overhead_percentage": timing_summary.get("overhead_percentage", 0),
+            },
+        )
+        
+        # Log summary for immediate visibility
+        logger.info(f"Pipeline timing summary: {timing_summary}")
 
     return result
 
