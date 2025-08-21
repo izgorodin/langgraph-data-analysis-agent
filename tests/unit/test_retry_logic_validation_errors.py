@@ -50,37 +50,23 @@ class TestValidationErrorRetryLogic:
         
         with patch("src.agent.nodes.llm_completion") as mock_llm:
             mock_llm.side_effect = [
-                '{"task": "test", "tables": ["orders"]}',  # Plan with valid table
-                "SELECT * FROM forbidden_table",  # SQL with security violation
-                "FALLBACK SQL",  # Should not be called if no retry
+                '{"task": "test", "tables": ["orders"]}',  # Plan  
+                "DROP TABLE users",  # SQL with security violation (DML/DDL)
+                "SHOULD NOT BE CALLED",  # Should not retry for security violations
             ]
             
-            # Mock validation to simulate security violation
-            with patch("src.agent.nodes.sqlglot.parse_one") as mock_parse:
-                # Create a mock parsed object that will pass initial parsing
-                mock_parsed = Mock()
-                mock_parse.return_value = mock_parsed
-                
-                # Mock the table validation to fail with security error
-                with patch("src.agent.nodes._set_validation_error") as mock_set_error:
-                    # Override the validate_sql_node to set a security error
-                    def mock_validate_sql_node(state):
-                        state.error = "Forbidden table 'forbidden_table' not in allowed tables - potential security violation"
-                        return state
-                    
-                    with patch("src.agent.nodes.validate_sql_node", side_effect=mock_validate_sql_node):
-                        initial_state = AgentState(
-                            question="Test permanent error",
-                            max_retries=2
-                        )
-                        
-                        final_state = app.invoke(initial_state)
-                        
-                        # Should not retry for security violations
-                        assert final_state.error is not None
-                        assert "security violation" in final_state.error
-                        # Should not have called SQL generation multiple times
-                        assert mock_llm.call_count <= 2  # Plan + initial SQL only
+            initial_state = AgentState(
+                question="Test permanent error",
+                max_retries=2
+            )
+            
+            final_state = app.invoke(initial_state)
+            
+            # Should have security error and not retry
+            assert final_state.error is not None
+            assert "security violation" in final_state.error.lower() or "drop" in final_state.error.lower()
+            # Should not have retried for security violations
+            assert mock_llm.call_count <= 2  # Plan + initial SQL only
 
     def test_retry_with_sql_simplification(self, mock_bigquery_client, mock_gemini_client):
         """Test that retry attempts include error context for SQL simplification."""

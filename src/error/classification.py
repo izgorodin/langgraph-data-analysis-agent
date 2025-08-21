@@ -235,6 +235,9 @@ class ErrorClassifier:
         if "Array cannot have a null element" in error_message:
             return "Data processing issue detected. Automatically applying fix..."
 
+        if "type mismatch" in error_message.lower() or "timestamp vs date" in error_message.lower():
+            return "Data type issue detected. Automatically simplifying query..."
+
         if "timeout" in error_message.lower():
             return "Operation took longer than expected. Retrying..."
 

@@ -151,7 +151,14 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
     # Add error context if this is a retry
     if state.retry_count > 0 and state.last_error:
-        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
+        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\n"
+        prompt += "Please fix the SQL and try again. Consider these improvements:\n"
+        prompt += "- Use simpler functions and avoid complex expressions\n"
+        prompt += "- Check column names and table aliases carefully\n" 
+        prompt += "- Ensure proper data type handling (e.g., TIMESTAMP vs DATE)\n"
+        prompt += "- Use explicit JOINs and WHERE conditions\n"
+        if state.retry_count >= 2:
+            prompt += "- Consider using a very simple SELECT with basic columns only\n"
 
     sql = llm_completion(prompt, system=SQL_SYSTEM)
     cleaned = (sql or "").strip().strip("`")
