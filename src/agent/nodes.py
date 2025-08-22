@@ -130,7 +130,6 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
     integration with fallback to the original implementation. It updates the state
     object with the generated SQL and relevant error/retry information.
     """
-    """Generate SQL based on the plan."""
     # Handle retry state if needed
     _handle_retry_state(state)
     # Option to use enhanced LLM integration
