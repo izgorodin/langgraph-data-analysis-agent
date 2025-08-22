@@ -64,16 +64,27 @@ class ErrorClassifier:
                 RecoveryStrategy.GRACEFUL_DEGRADATION,
                 ErrorSeverity.HIGH,
             ),
-            # SQL and schema errors - user guided
+            # SQL and schema errors - user guided (retryable with simplification)
             (
-                r"syntax.*error|invalid.*sql",
+                r"syntax.*error|invalid.*sql|parse.*error",
                 RecoveryStrategy.USER_GUIDED,
                 ErrorSeverity.HIGH,
+            ),
+            (
+                r"type.*mismatch|timestamp.*vs.*date|data.*type.*mismatch",
+                RecoveryStrategy.USER_GUIDED,
+                ErrorSeverity.MEDIUM,
             ),
             (
                 r"table.*not.*found|column.*not.*found",
                 RecoveryStrategy.USER_GUIDED,
                 ErrorSeverity.MEDIUM,
+            ),
+            # Security violations - permanent (non-retryable)
+            (
+                r"forbidden.*table|not.*in.*allowed.*tables|security.*violation",
+                RecoveryStrategy.NO_RECOVERY,
+                ErrorSeverity.CRITICAL,
             ),
             # System errors
             (
@@ -223,6 +234,9 @@ class ErrorClassifier:
 
         if "Array cannot have a null element" in error_message:
             return "Data processing issue detected. Automatically applying fix..."
+
+        if "type mismatch" in error_message.lower() or "timestamp vs date" in error_message.lower():
+            return "Data type issue detected. Automatically simplifying query..."
 
         if "timeout" in error_message.lower():
             return "Operation took longer than expected. Retrying..."

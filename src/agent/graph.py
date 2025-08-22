@@ -30,16 +30,62 @@ def build_graph():
     graph.add_edge("synthesize_sql", "validate_sql")
 
     def on_valid(state: AgentState):
+        """Enhanced retry logic with error classification and logging."""
+        import logging
+        from src.error.classification import ErrorClassifier, RecoveryStrategy
+        
+        logger = logging.getLogger(__name__)
+        
         # Proceed when validation passed
         if state.error is None:
             return "execute_sql"
             
-        # Validation failed - check if we can retry
-        if state.retry_count < state.max_retries:
-            # Go back to synthesize_sql for retry
+        # Classify the error to determine retry strategy
+        classifier = ErrorClassifier()
+        strategy, severity = classifier.classify(state.error)
+        
+        # Log the retry decision
+        logger.info(
+            "Validation error encountered, determining retry strategy",
+            extra={
+                "error": state.error,
+                "strategy": strategy.value,
+                "severity": severity.value,
+                "retry_count": state.retry_count,
+                "max_retries": state.max_retries,
+                "node": "validate_sql"
+            }
+        )
+        
+        # Check if error is retryable and within retry limits
+        is_retryable = strategy in {RecoveryStrategy.USER_GUIDED, RecoveryStrategy.IMMEDIATE_RETRY}
+        within_retry_limit = state.retry_count < state.max_retries
+        
+        if is_retryable and within_retry_limit:
+            logger.info(
+                "Initiating retry for validation error",
+                extra={
+                    "retry_attempt": state.retry_count + 1,
+                    "max_retries": state.max_retries,
+                    "error_category": strategy.value,
+                    "node": "validate_sql"
+                }
+            )
             return "synthesize_sql"
         else:
-            # Retries exhausted - go to error handler
+            # Log why retry was not attempted
+            reason = "non-retryable error" if not is_retryable else "retry limit exceeded"
+            logger.warning(
+                "No retry attempted for validation error",
+                extra={
+                    "reason": reason,
+                    "error": state.error,
+                    "strategy": strategy.value,
+                    "retry_count": state.retry_count,
+                    "max_retries": state.max_retries,
+                    "node": "validate_sql"
+                }
+            )
             return "error_handler"
 
     graph.add_conditional_edges(

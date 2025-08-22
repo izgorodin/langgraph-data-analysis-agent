@@ -113,20 +113,6 @@ def plan_node(state: AgentState) -> AgentState:
 # Node: synthesize_sql
 
 
-def synthesize_sql_node(state: AgentState) -> AgentState:
-    """
-    Generate SQL based on the plan, handling retry logic and state management.
-
-    This function generates SQL from the provided plan, manages retry attempts by
-    updating error context and retry count in the state, and supports enhanced LLM
-    integration with fallback to the original implementation. It updates the state
-    object with the generated SQL and relevant error/retry information.
-    """
-    # Check if we're retrying - if so, increment retry count and set up error context
-    if state.error is not None:
-        state.retry_count += 1
-        state.last_error = state.error
-        state.error = None  # Clear current error for retry
 def _handle_retry_state(state: AgentState) -> None:
     """Update retry state if an error is present."""
     if state.error is not None:
@@ -136,7 +122,14 @@ def _handle_retry_state(state: AgentState) -> None:
 
 
 def synthesize_sql_node(state: AgentState) -> AgentState:
-    """Generate SQL based on the plan."""
+    """
+    Generate SQL based on the plan, handling retry logic and state management.
+
+    This function generates SQL from the provided plan, manages retry attempts by
+    updating error context and retry count in the state, and supports enhanced LLM
+    integration with fallback to the original implementation. It updates the state
+    object with the generated SQL and relevant error/retry information.
+    """
     # Handle retry state if needed
     _handle_retry_state(state)
     # Option to use enhanced LLM integration
@@ -157,7 +150,14 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
     # Add error context if this is a retry
     if state.retry_count > 0 and state.last_error:
-        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\nPlease fix the SQL and try again. Pay attention to column names and table joins."
+        prompt += f"\n\nPREVIOUS ATTEMPT FAILED WITH ERROR: {state.last_error}\n"
+        prompt += "Please fix the SQL and try again. Consider these improvements:\n"
+        prompt += "- Use simpler functions and avoid complex expressions\n"
+        prompt += "- Check column names and table aliases carefully\n" 
+        prompt += "- Ensure proper data type handling (e.g., TIMESTAMP vs DATE)\n"
+        prompt += "- Use explicit JOINs and WHERE conditions\n"
+        if state.retry_count >= 2:
+            prompt += "- Consider using a very simple SELECT with basic columns only\n"
 
     sql = llm_completion(prompt, system=SQL_SYSTEM)
     cleaned = (sql or "").strip().strip("`")
