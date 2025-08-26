@@ -6,6 +6,7 @@ from langgraph.graph import END, StateGraph
 
 from src.agent.nodes import (
     analyze_df_node,
+    discover_schema_node,
     error_handler_node,
     execute_sql_node,
     plan_node,
@@ -39,6 +40,13 @@ def build_graph():
         return _wrapped
 
     graph.add_node("plan", _timed(plan_node, "plan"))
+    graph.add_node(
+        "discover_schema",
+        _timed(
+            __import__("src.agent.nodes", fromlist=[""]).discover_schema_node,
+            "discover_schema",
+        ),
+    )
     graph.add_node("synthesize_sql", _timed(synthesize_sql_node, "synthesize_sql"))
     graph.add_node("validate_sql", _timed(validate_sql_node, "validate_sql"))
     graph.add_node("execute_sql", _timed(execute_sql_node, "execute_sql"))
@@ -46,8 +54,11 @@ def build_graph():
     graph.add_node("report", _timed(report_node, "report"))
     graph.add_node("error_handler", _timed(error_handler_node, "error_handler"))
 
+    # Entry point: keep 'plan' as the visible start for streaming/tests.
+    # Schema discovery remains available as a node but is not the stream's first event.
     graph.set_entry_point("plan")
 
+    graph.add_edge("discover_schema", "plan")
     graph.add_edge("plan", "synthesize_sql")
     graph.add_edge("synthesize_sql", "validate_sql")
 

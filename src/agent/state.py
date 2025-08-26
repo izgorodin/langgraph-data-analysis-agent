@@ -23,6 +23,8 @@ class AgentState(BaseModel):
     # Pipeline timing information for LGDA-018
     pipeline_timing: Dict[str, float] = Field(default_factory=dict)
     pipeline_start_time: Optional[float] = None
+    # Optional latest schema snapshot discovered for this run
+    schema_snapshot: Optional[Dict[str, object]] = None
 
     def start_pipeline_timing(self) -> None:
         """Mark the start of pipeline execution for timing."""

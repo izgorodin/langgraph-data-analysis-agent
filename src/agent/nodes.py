@@ -12,6 +12,7 @@ from sqlglot import exp
 from ..bq import get_schema, run_query
 from ..config import LGDAConfig, settings
 from ..llm import llm_completion
+from . import schema as schema_mod
 from .llm_integration import get_llm_integration
 from .prompts import PLAN_SYSTEM, REPORT_SYSTEM, SQL_SYSTEM
 from .state import AgentState
@@ -80,6 +81,38 @@ def _schema_map() -> Dict[str, list[str]]:
     return schema
 
 
+# Node: discover_schema
+def discover_schema_node(state: AgentState) -> AgentState:
+    """Discover schema snapshot once and store in state for downstream nodes.
+
+    This node runs before planning so the planner and synthesize nodes can use
+    the same compact schema snapshot and avoid repeated blocking queries.
+    """
+    try:
+        # Only attempt discovery if snapshot not already present
+        if not getattr(state, "schema_snapshot", None):
+            tbls = list(ALLOWED)
+            # Discover without fetching sample rows by default to avoid blocking
+            try:
+                schema_snapshot = schema_mod.discover_schema(tbls, sample_rows=0)
+            except TypeError:
+                # Some tests or plugins may provide a discover_schema that accepts only tables
+                schema_snapshot = schema_mod.discover_schema(tbls)
+            state.schema_snapshot = schema_snapshot
+            try:
+                state.history.append(
+                    {"note": "schema_snapshot_created", "tables": ",".join(tbls)}
+                )
+            except Exception:
+                pass
+    except Exception as e:  # noqa: BLE001
+        try:
+            state.history.append({"note": "schema_snapshot_failed", "error": str(e)})
+        except Exception:
+            pass
+    return state
+
+
 # Node: plan
 
 
@@ -87,7 +120,17 @@ def plan_node(state: AgentState) -> AgentState:
     # Respect pre-populated plan_json from custom state
     if getattr(state, "plan_json", None):
         return state
-    schema = _schema_map()
+    # Ensure a schema_snapshot exists: try to run discovery inline if missing so planner has schema
+    if not getattr(state, "schema_snapshot", None):
+        try:
+            # discover_schema_node is defined in this module above
+            state = discover_schema_node(state)
+        except Exception:
+            # fallback silently; planner will use local _schema_map()
+            pass
+
+    # Prefer pre-computed schema_snapshot if available on state (from discover_schema_node)
+    schema = getattr(state, "schema_snapshot", None) or _schema_map()
 
     # Option to use enhanced LLM integration
     if hasattr(state, "use_enhanced_llm") and state.use_enhanced_llm:
@@ -228,6 +271,20 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
     """Generate SQL based on the plan."""
     # Handle retry state if needed
     _handle_retry_state(state)
+    # If a previous corrected SQL exists (from autofix or LLM resynthesis), always prefer it so we
+    # do not overwrite a known-good SQL with a newly scaffolded one.
+    if getattr(state, "last_working_sql", None):
+        try:
+            state.sql = state.last_working_sql
+            try:
+                state.history.append(
+                    {"note": "reuse_last_working_sql", "source": "last_working_sql"}
+                )
+            except Exception:
+                pass
+        except Exception:
+            pass
+        return state
     # Option to use enhanced LLM integration
     if hasattr(state, "use_enhanced_llm") and state.use_enhanced_llm:
         try:
@@ -239,10 +296,37 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             # Fallback to original implementation
             pass
 
-    # Build prompt with error context for retry
+    # Use schema snapshot provided by a prior discover_schema_node if available.
+    # Fall back to a fast local schema map if not present to avoid blocking calls here.
+    schema_snapshot = getattr(state, "schema_snapshot", None)
+    if schema_snapshot:
+        # convert schema_snapshot (table -> {columns: [...]}) to simple map table -> [cols]
+        try:
+            schema = {t: meta.get("columns", []) for t, meta in schema_snapshot.items()}
+        except Exception:
+            schema = _schema_map()
+    else:
+        # Do NOT perform discovery here; expect discover_schema_node to populate state.schema_snapshot
+        # Fall back to a fast in-memory schema map to avoid blocking calls.
+        schema = _schema_map()
+
+    # Build prompt with error context for retry; include compact schema if present
+    compact_schema_str = ""
+    try:
+        if getattr(state, "schema_snapshot", None):
+            parts = []
+            for t, meta in state.schema_snapshot.items():
+                cols = meta.get("columns", [])[:8] if isinstance(meta, dict) else []
+                parts.append(f"{t}: {', '.join(cols)}")
+            compact_schema_str = "Tables & columns (sample): " + "; ".join(parts)
+    except Exception:
+        compact_schema_str = ""
+
     prompt = SQL_TEMPLATE.render(
         plan_json=json.dumps(state.plan_json), allowed_tables=",".join(ALLOWED)
     )
+    if compact_schema_str:
+        prompt = compact_schema_str + "\n\n" + prompt
 
     # Add error context if this is a retry
     if state.retry_count > 0 and state.last_error:
@@ -308,6 +392,81 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
     # Do NOT scaffold arbitrary non-empty invalid text; let validation catch errors and trigger retries.
     if not cleaned:
         config = "config" in locals() and config or LGDAConfig()
+        strict_mode = getattr(LGDAConfig(), "strict_no_fake_report", True)
+        # If strict mode is enabled, do not generate a scaffolding SQL that pretends to be real data
+        if strict_mode:
+            # Instead of silently blocking and returning no feedback, produce a structured
+            # diagnostic payload that the report node can show to the user. This contains
+            # suggested safe checks (non-fabricated) the operator can run to validate schema
+            # and data presence, plus human-readable recommendations to fix the plan or
+            # enable provisional scaffolding for debugging.
+            try:
+                state.history.append(
+                    {
+                        "note": "sql_scaffold_blocked_strict_mode",
+                        "reason": "Strict no-fake-report enabled; refusing to scaffold SQL",
+                    }
+                )
+            except Exception:
+                pass
+
+            # Build diagnostic: list planned tables, available schema columns, and safe checks
+            plan_tables = []
+            try:
+                plan_tables = [t for t in (state.plan_json or {}).get("tables", [])]
+            except Exception:
+                plan_tables = []
+
+            schema_snapshot = getattr(state, "schema_snapshot", None) or {}
+            tables_info = {}
+            for t in plan_tables:
+                cols = (
+                    schema_snapshot.get(t, {}).get("columns", [])
+                    if isinstance(schema_snapshot, dict)
+                    else []
+                )
+                tables_info[t] = cols
+
+            # Suggested safe checks (non-mutating): counts and sample rows for each planned table
+            dataset = settings.dataset_id
+            suggested_checks = []
+            for t in plan_tables:
+                suggested_checks.append(
+                    {
+                        "check": f"count_{t}",
+                        "sql": f"SELECT COUNT(1) AS cnt FROM `{dataset}.{t}` LIMIT 1",
+                        "purpose": "Verify table contains rows",
+                    }
+                )
+                suggested_checks.append(
+                    {
+                        "check": f"sample_{t}",
+                        "sql": f"SELECT * FROM `{dataset}.{t}` LIMIT 5",
+                        "purpose": "Inspect sample rows and column names",
+                    }
+                )
+
+            diagnostic = {
+                "reason": "Strict mode blocked scaffold to avoid fabricating results",
+                "plan_tables": plan_tables,
+                "tables_info": tables_info,
+                "suggested_checks": suggested_checks,
+                "next_steps": [
+                    "Run the suggested checks to confirm available columns and data.",
+                    "If columns are missing from schema, update plan or mappings so LLM can generate correct joins.",
+                    "To allow provisional scaffolds for debugging, disable strict_no_fake_report and retry.",
+                ],
+            }
+
+            try:
+                state.diagnostic = diagnostic
+            except Exception:
+                pass
+
+            # Set a clear error but keep diagnostic for report node
+            state.error = "SQL scaffold blocked in strict_no_fake_report mode; diagnostic available in state.diagnostic"
+            return state
+
         if getattr(config, "sql_scaffold_enabled", False):
             # try to use a table from the plan that is allowed
             plan_tables = []
@@ -382,52 +541,189 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
             joins = []
 
             # Build safe joins based on which tables are included and their natural keys
+            def _find_join_cols(table_a, table_b, schema):
+                """Find best candidate join columns between two tables using schema heuristics.
+
+                Returns tuple (col_a, col_b) or (None, None) if not found.
+                Heuristics: exact matching column names, common fk patterns (table_a_id, table_b_id),
+                or well-known pairs like order_id/order_id, user_id/user_id, product_id/product_id.
+                """
+                cols_a = schema.get(table_a, []) or []
+                cols_b = schema.get(table_b, []) or []
+
+                # Preferred explicit pairs
+                preferred_pairs = [
+                    ("order_id", "order_id"),
+                    ("user_id", "user_id"),
+                    ("product_id", "product_id"),
+                    ("id", "id"),
+                    ("product_id", "id"),
+                    ("id", "product_id"),
+                ]
+                for a_col, b_col in preferred_pairs:
+                    if a_col in cols_a and b_col in cols_b:
+                        return a_col, b_col
+
+                # Exact name intersection
+                for c in cols_a:
+                    if c in cols_b:
+                        return c, c
+
+                # FK style: {other_table}_id
+                for c in cols_a:
+                    if c.endswith("_id"):
+                        base = c[:-3]
+                        cand = base + "_id"
+                        if cand in cols_b:
+                            return c, cand
+
+                # Fallback: try common candidates in each table
+                common_candidates = [
+                    "user_id",
+                    "customer_id",
+                    "order_id",
+                    "product_id",
+                    "id",
+                    "sku",
+                ]
+                for cand in common_candidates:
+                    if cand in cols_a and cand in cols_b:
+                        return cand, cand
+
+                return None, None
+
             if chosen == "orders":
                 if "order_items" in included:
                     joins.append(
                         f"JOIN {_qual('order_items')} AS oi ON {primary_alias}.order_id = oi.order_id"
                     )
                 if "products" in included and "order_items" in included:
-                    joins.append(
-                        f"JOIN {_qual('products')} AS p ON oi.product_id = p.product_id"
-                    )
+                    # Determine product primary key in products table (common variants: 'id', 'product_id', 'sku')
+                    prod_pk = None
+                    prod_cols = schema.get("products", []) or []
+                    for candidate in ("product_id", "id", "sku"):
+                        if candidate in prod_cols:
+                            prod_pk = candidate
+                            break
+                    if not prod_pk and prod_cols:
+                        prod_pk = prod_cols[0]
+                    # Prefer schema-driven matching between order_items and products
+                    a_col, b_col = _find_join_cols("order_items", "products", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('products')} AS p ON oi.{a_col} = p.{b_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('products')} AS p ON oi.product_id = p.{prod_pk}"
+                        )
                 if "users" in included:
-                    joins.append(
-                        f"JOIN {_qual('users')} AS u ON {primary_alias}.user_id = u.user_id"
-                    )
+                    # Schema-driven join between orders and users
+                    a_col, b_col = _find_join_cols(chosen, "users", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('users')} AS u ON {primary_alias}.{a_col} = u.{b_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('users')} AS u ON {primary_alias}.user_id = u.user_id"
+                        )
 
             elif chosen == "order_items":
                 if "orders" in included:
-                    joins.append(
-                        f"JOIN {_qual('orders')} AS o ON o.order_id = oi.order_id"
-                    )
+                    a_col, b_col = _find_join_cols("order_items", "orders", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('orders')} AS o ON o.{b_col} = oi.{a_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('orders')} AS o ON o.order_id = oi.order_id"
+                        )
                 if "products" in included:
-                    joins.append(
-                        f"JOIN {_qual('products')} AS p ON oi.product_id = p.product_id"
-                    )
+                    prod_pk = None
+                    prod_cols = schema.get("products", []) or []
+                    for candidate in ("product_id", "id", "sku"):
+                        if candidate in prod_cols:
+                            prod_pk = candidate
+                            break
+                    if not prod_pk and prod_cols:
+                        prod_pk = prod_cols[0]
+                    a_col, b_col = _find_join_cols("order_items", "products", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('products')} AS p ON oi.{a_col} = p.{b_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('products')} AS p ON oi.product_id = p.{prod_pk}"
+                        )
                 # users via orders if orders included
                 if "users" in included and "orders" in included:
-                    joins.append(f"JOIN {_qual('users')} AS u ON o.user_id = u.user_id")
+                    a_col, b_col = _find_join_cols("orders", "users", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('users')} AS u ON o.{a_col} = u.{b_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('users')} AS u ON o.user_id = u.user_id"
+                        )
 
             elif chosen == "users":
                 if "orders" in included:
-                    joins.append(
-                        f"JOIN {_qual('orders')} AS o ON o.user_id = u.user_id"
-                    )
-                    if "order_items" in included:
+                    a_col, b_col = _find_join_cols("orders", "users", schema)
+                    if a_col and b_col:
                         joins.append(
-                            f"JOIN {_qual('order_items')} AS oi ON o.order_id = oi.order_id"
+                            f"JOIN {_qual('orders')} AS o ON o.{a_col} = u.{b_col}"
                         )
-                        if "products" in included:
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('orders')} AS o ON o.user_id = u.user_id"
+                        )
+                    if "order_items" in included:
+                        a_col, b_col = _find_join_cols("orders", "order_items", schema)
+                        if a_col and b_col:
                             joins.append(
-                                f"JOIN {_qual('products')} AS p ON oi.product_id = p.product_id"
+                                f"JOIN {_qual('order_items')} AS oi ON o.{a_col} = oi.{b_col}"
                             )
+                        else:
+                            joins.append(
+                                f"JOIN {_qual('order_items')} AS oi ON o.order_id = oi.order_id"
+                            )
+                        if "products" in included:
+                            a_col, b_col = _find_join_cols(
+                                "order_items", "products", schema
+                            )
+                            if a_col and b_col:
+                                joins.append(
+                                    f"JOIN {_qual('products')} AS p ON oi.{a_col} = p.{b_col}"
+                                )
+                            else:
+                                joins.append(
+                                    f"JOIN {_qual('products')} AS p ON oi.product_id = p.product_id"
+                                )
 
             elif chosen == "products":
                 if "order_items" in included:
-                    joins.append(
-                        f"JOIN {_qual('order_items')} AS oi ON oi.product_id = p.product_id"
-                    )
+                    # Order_items -> products FK may reference products.id or products.product_id
+                    prod_pk = None
+                    prod_cols = schema.get("products", []) or []
+                    for candidate in ("product_id", "id", "sku"):
+                        if candidate in prod_cols:
+                            prod_pk = candidate
+                            break
+                    if not prod_pk and prod_cols:
+                        prod_pk = prod_cols[0]
+                    a_col, b_col = _find_join_cols("order_items", "products", schema)
+                    if a_col and b_col:
+                        joins.append(
+                            f"JOIN {_qual('order_items')} AS oi ON oi.{a_col} = p.{b_col}"
+                        )
+                    else:
+                        joins.append(
+                            f"JOIN {_qual('order_items')} AS oi ON oi.product_id = p.{prod_pk}"
+                        )
                     if "orders" in included:
                         joins.append(
                             f"JOIN {_qual('orders')} AS o ON o.order_id = oi.order_id"
@@ -491,6 +787,25 @@ def synthesize_sql_node(state: AgentState) -> AgentState:
 
 def validate_sql_node(state: AgentState) -> AgentState:
     """Enhanced SQL validation with comprehensive security checks."""
+
+    # Guard: ensure we have SQL to validate. If previous node (synth) blocked scaffolding
+    # due to strict mode or LLM returned no SQL, state.sql may be None. Fail-fast with
+    # an explicit validation error to avoid NoneType attribute errors downstream.
+    if not getattr(state, "sql", None):
+        try:
+            state.history.append(
+                {
+                    "note": "validate_sql_no_sql",
+                    "reason": "No SQL found in state (synth blocked scaffolding or LLM returned no SQL)",
+                }
+            )
+        except Exception:
+            pass
+        _set_validation_error(
+            state,
+            "No SQL to validate: previous node produced no SQL (possibly blocked by strict_no_fake_report).",
+        )
+        return state
 
     # Pre-parsing security checks (run first to catch DML/DDL and malformed queries)
     try:
@@ -775,22 +1090,306 @@ def execute_sql_node(state: AgentState) -> AgentState:
             r"Name\s+(?P<col>\w+)\s+not\s+found\s+inside\s+(?P<alias>\w+)", msg
         )
         if m:
+            col = m.group("col")
+            alias = m.group("alias")
             try:
                 state.history.append(
                     {
                         "note": "scaffold_error_detected",
-                        "col": m.group("col"),
-                        "alias": m.group("alias"),
+                        "col": col,
+                        "alias": alias,
                         "message": msg,
                     }
                 )
             except Exception:
                 pass
-            # Set state.error so graph's conditional edges can route to synthesize_sql if retries remain
-            state.error = msg
-            return state
+
+            # Try a best-effort automatic SQL fix using schema_snapshot: replace alias.col with alias.<candidate>
+            try:
+                # parse alias->table mapping using sqlglot
+                parsed = sqlglot.parse_one(state.sql, read="bigquery")
+                alias_map = {}
+                for t in parsed.find_all(exp.Table):
+                    tbl_name = t.name
+                    tbl_alias = None
+                    if hasattr(t, "alias") and t.alias:
+                        tbl_alias = str(t.alias)
+                    # some Table nodes wrap with Identifier; fallback
+                    if tbl_alias:
+                        alias_map[tbl_alias] = tbl_name
+
+                # find target table name for the alias
+                target_table = alias_map.get(alias)
+                candidate_col = None
+                if target_table and getattr(state, "schema_snapshot", None):
+                    cols = state.schema_snapshot.get(target_table, {}).get(
+                        "columns", []
+                    )
+                    # prefer same name if exists, else common candidates
+                    if col in cols:
+                        candidate_col = col
+                    else:
+                        for candidate in ("product_id", "id", "sku"):
+                            if candidate in cols:
+                                candidate_col = candidate
+                                break
+                        if not candidate_col and cols:
+                            candidate_col = cols[0]
+
+                if candidate_col and candidate_col != col:
+                    new_sql = re.sub(
+                        rf"\b{alias}\.{col}\b", f"{alias}.{candidate_col}", state.sql
+                    )
+                    try:
+                        state.history.append(
+                            {
+                                "note": "sql_autofix_attempt",
+                                "alias": alias,
+                                "from": col,
+                                "to": candidate_col,
+                            }
+                        )
+                    except Exception:
+                        pass
+
+                    # Try to run the fixed SQL once
+                    try:
+                        df = run_query(new_sql)
+                        # success: update state.sql and proceed
+                        state.sql = new_sql
+                        # Persist working SQL so retries reuse it
+                        try:
+                            state.last_working_sql = new_sql
+                            state.history.append(
+                                {"note": "last_working_sql_set", "method": "autofix"}
+                            )
+                        except Exception:
+                            pass
+                        try:
+                            state.history.append(
+                                {"note": "sql_autofix_succeeded", "sql": new_sql[:2000]}
+                            )
+                        except Exception:
+                            pass
+                        # continue to summarization below
+                    except Exception as e2:
+                        # autofix attempt failed; record and try LLM resynthesis below
+                        try:
+                            state.history.append(
+                                {"note": "sql_autofix_failed", "error": str(e2)}
+                            )
+                        except Exception:
+                            pass
+                        # fall through to attempt LLM re-synthesis
+                else:
+                    # No candidate found to autofix - will try LLM resynthesis
+                    # Try a last-resort heuristic: if alias->table mapping failed, attempt to infer table name
+                    # from the SQL text (look for FROM `...tablename` AS alias) and if schema shows 'id' column
+                    # but not the original col, replace alias.col -> alias.id
+                    try:
+                        if getattr(state, "schema_snapshot", None):
+                            # regex to find FROM `...table` AS alias or JOIN `...table` AS alias
+                            pattern = rf"(?:FROM|JOIN)\s+`?\w+\.\w+\.(?P<table>\w+)`?\s+AS\s+{alias}\b"
+                            m2 = re.search(pattern, state.sql, flags=re.IGNORECASE)
+                            table_name = None
+                            if m2:
+                                table_name = m2.group("table")
+                            if table_name:
+                                cols = state.schema_snapshot.get(table_name, {}).get(
+                                    "columns", []
+                                )
+                                if "id" in cols and col not in cols:
+                                    new_sql = re.sub(
+                                        rf"\b{alias}\.{col}\b", f"{alias}.id", state.sql
+                                    )
+                                    try:
+                                        state.history.append(
+                                            {
+                                                "note": "sql_autofix_infer_id",
+                                                "alias": alias,
+                                                "from": col,
+                                                "to": "id",
+                                                "table": table_name,
+                                            }
+                                        )
+                                    except Exception:
+                                        pass
+                                    try:
+                                        df = run_query(new_sql)
+                                        state.sql = new_sql
+                                        state.last_working_sql = new_sql
+                                        try:
+                                            state.history.append(
+                                                {
+                                                    "note": "last_working_sql_set",
+                                                    "method": "inferred_id_autofix",
+                                                }
+                                            )
+                                        except Exception:
+                                            pass
+                                    except Exception:
+                                        # if this heuristic fails, fall through to LLM resynth
+                                        pass
+                    except Exception:
+                        pass
+            except Exception:
+                # If anything goes wrong during autofix attempt, preserve original error and fall through
+                try:
+                    state.history.append(
+                        {"note": "sql_autofix_exception", "error": str(Exception)}
+                    )
+                except Exception:
+                    pass
+                # fall through to LLM resynthesis attempt
+
+            # At this point, either autofix failed or no candidate was found; attempt LLM re-synthesis
+            try:
+                # Build compact schema string
+                compact_schema = ""
+                if getattr(state, "schema_snapshot", None):
+                    parts = []
+                    for t, meta in state.schema_snapshot.items():
+                        cols = (
+                            meta.get("columns", [])[:12]
+                            if isinstance(meta, dict)
+                            else []
+                        )
+                        parts.append(f"{t}: {', '.join(cols)}")
+                    compact_schema = "Tables & columns: " + "; ".join(parts)
+
+                resynth_prompt = (
+                    f"BigQuery error: {msg}\n"
+                    "Original SQL:\n"
+                    f"{state.sql}\n\n"
+                    "Schema snapshot (compact):\n"
+                    f"{compact_schema}\n\n"
+                    "Please return a single corrected BigQuery Standard SQL statement that fixes the error above."
+                    " Output ONLY the SQL statement, no explanation, no fences."
+                )
+                try:
+                    state.history.append(
+                        {"note": "llm_resynth_attempt", "error": msg[:1000]}
+                    )
+                except Exception:
+                    pass
+
+                res_sql = llm_completion(resynth_prompt, system=SQL_SYSTEM)
+                if not res_sql:
+                    # LLM did not produce SQL
+                    try:
+                        state.history.append({"note": "llm_resynth_no_output"})
+                    except Exception:
+                        pass
+                    state.error = msg
+                    return state
+
+                # Clean fences and code markers
+                res = (res_sql or "").strip()
+                if res.startswith("```"):
+                    res = re.sub(r"^```[a-zA-Z]*\n?", "", res)
+                    res = re.sub(r"\n?```\s*$", "", res)
+                res = res.strip().strip("`")
+                # Remove possible leading 'SQL' label
+                if res.lower().startswith("sql\n"):
+                    res = res[4:].strip()
+
+                # Validate syntax with sqlglot
+                try:
+                    parsed = sqlglot.parse_one(res, read="bigquery")
+                    if parsed is None:
+                        raise ValueError("LLM returned invalid SQL")
+                except Exception as e_parse:
+                    try:
+                        state.history.append(
+                            {"note": "llm_resynth_parse_failed", "error": str(e_parse)}
+                        )
+                    except Exception:
+                        pass
+                    state.error = msg
+                    return state
+
+                # Try executing the resynthesized SQL once
+                try:
+                    df = run_query(res)
+                    # success: update state.sql and persist working SQL
+                    state.sql = res
+                    try:
+                        state.last_working_sql = res
+                        state.history.append(
+                            {"note": "last_working_sql_set", "method": "llm_resynth"}
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        state.history.append(
+                            {"note": "llm_resynth_succeeded", "sql": res[:2000]}
+                        )
+                    except Exception:
+                        pass
+                    # continue to summarization below
+                except Exception as e_run:
+                    try:
+                        state.history.append(
+                            {"note": "llm_resynth_failed", "error": str(e_run)}
+                        )
+                    except Exception:
+                        pass
+                    state.error = msg
+                    return state
+            except Exception as e_any:
+                try:
+                    state.history.append(
+                        {"note": "llm_resynth_exception", "error": str(e_any)}
+                    )
+                except Exception:
+                    pass
+                state.error = msg
+                return state
 
         # Non-scaffold execution error: set state.error and stop
+        # Final heuristic: if scaffold/autofix/llm resynth all failed, try a last-resort replacement
+        # alias.col -> alias.id when schema snapshot indicates 'id' exists but original col does not.
+        try:
+            m_final = re.search(
+                r"Name\s+(?P<col>\w+)\s+not\s+found\s+inside\s+(?P<alias>\w+)", msg
+            )
+            if m_final and getattr(state, "schema_snapshot", None):
+                col = m_final.group("col")
+                alias = m_final.group("alias")
+                # Find table name for alias by scanning FROM/JOIN clauses
+                pat = rf"(?:FROM|JOIN)\s+`?\w+\.\w+\.(?P<table>\w+)`?\s+AS\s+{alias}\b"
+                m_tbl = re.search(pat, state.sql, flags=re.IGNORECASE)
+                table_name = m_tbl.group("table") if m_tbl else None
+                if table_name:
+                    cols = state.schema_snapshot.get(table_name, {}).get("columns", [])
+                    if "id" in cols and col not in cols:
+                        new_sql = re.sub(
+                            rf"\b{alias}\.{col}\b", f"{alias}.id", state.sql
+                        )
+                        try:
+                            df = run_query(new_sql)
+                            state.sql = new_sql
+                            state.last_working_sql = new_sql
+                            try:
+                                state.history.append(
+                                    {
+                                        "note": "sql_autofix_inferred_id_final",
+                                        "alias": alias,
+                                        "from": col,
+                                        "to": "id",
+                                        "table": table_name,
+                                    }
+                                )
+                            except Exception:
+                                pass
+                            # success
+                            return state
+                        except Exception:
+                            # ignore failure and fall through to set error
+                            pass
+        except Exception:
+            pass
+
         state.error = msg
         return state
 

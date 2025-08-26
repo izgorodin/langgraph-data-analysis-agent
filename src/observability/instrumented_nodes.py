@@ -44,8 +44,8 @@ def instrument_node(node_name: str):
             with tracer.trace_stage_execution(
                 node_name, question=getattr(state, "question", "")
             ) as span:
-                # Start timing
-                start_time = time.time()
+                # Start high-resolution, monotonic timing
+                start_time = time.perf_counter()
 
                 # Set up logging context
                 with set_request_context(
@@ -57,8 +57,8 @@ def instrument_node(node_name: str):
                         # Execute the original node function (synchronous)
                         result = func(state)
 
-                        # Calculate metrics
-                        duration = time.time() - start_time
+                        # Calculate metrics using high-resolution timer
+                        duration = time.perf_counter() - start_time
 
                         # LGDA-018: Record timing in state for aggregation
                         result.record_node_timing(node_name, duration)
@@ -86,8 +86,8 @@ def instrument_node(node_name: str):
                         return result
 
                     except Exception as e:
-                        # Calculate metrics for failure
-                        duration = time.time() - start_time
+                        # Calculate metrics for failure using high-resolution timer
+                        duration = time.perf_counter() - start_time
                         error_type = type(e).__name__
 
                         # LGDA-018: Record timing even for failed nodes

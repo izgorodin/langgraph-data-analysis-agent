@@ -12,7 +12,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.insert(0, REPO_ROOT)
 
-from src.bq import run_query  # noqa: E402  (import after sys.path modification is intentional)
+from src.bq import (  # noqa: E402  (import after sys.path modification is intentional)
+    run_query,
+)
 
 # NOTE: these queries assume common column names in thelook_ecommerce dataset.
 # Adjust column names if your schema differs.
