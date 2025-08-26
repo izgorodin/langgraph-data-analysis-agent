@@ -122,6 +122,10 @@ class LGDAConfig(BaseSettings):
         default_factory=lambda: ["orders", "order_items", "products", "users"],
         validation_alias=AliasChoices("LGDA_ALLOWED_TABLES", "ALLOWED_TABLES"),
     )
+    # Optional: allow minimal SQL scaffold fallback when LLM returns empty/invalid SQL
+    sql_scaffold_enabled: bool = Field(
+        default=True, validation_alias="LGDA_SQL_SCAFFOLD"
+    )
 
     # Error handling policies
     strict_no_fake_report: bool = Field(

@@ -17,6 +17,7 @@ except Exception:
 
 from src.agent.graph import build_graph
 from src.agent.state import AgentState
+from src.bq import get_last_query_metrics
 from src.config import settings
 
 console = Console()
@@ -61,6 +62,7 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
     signal.alarm(timeout)
 
     final = None
+    final_state_from_stream: dict | None = None
     step_counter = 0
     total_steps = (
         6  # plan, synthesize_sql, validate_sql, execute_sql, analyze_df, report
@@ -109,9 +111,24 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
                             f"[yellow]Warning:[/yellow] failed to render node '{node}' output"
                         )
 
-        # If no final state captured from stream, invoke once
+                # Capture final state from stream to avoid re-running pipeline
+                try:
+                    if node in ("report", "error_handler"):
+                        if isinstance(s, dict):
+                            final_state_from_stream = s
+                except Exception:
+                    pass
+
+        # Prefer the final state captured from the stream; fall back to invoke
         if final is None:
-            final = app.invoke(state)
+            if final_state_from_stream is not None:
+                try:
+                    final = AgentState(**final_state_from_stream)
+                except Exception:
+                    # If reconstruction fails, use raw dict-like access later
+                    final = final_state_from_stream  # type: ignore[assignment]
+            else:
+                final = app.invoke(state)
 
     except CLITimeoutError as exc:
         console.rule("[bold red]Timeout")
@@ -134,7 +151,43 @@ def main(model: str, verbose: bool, timeout: int, question: str | None):
         signal.alarm(0)
 
     console.rule("[bold green]Insight")
-    console.print(Panel.fit(final.report or "No report", title="Agent Report"))
+    try:
+        report_text = getattr(final, "report", None)
+        if not report_text and isinstance(final, dict):
+            report_text = final.get("report")  # type: ignore[assignment]
+    except Exception:
+        report_text = None
+    console.print(Panel.fit(report_text or "No report", title="Agent Report"))
+
+    # Print timing summary if available
+    try:
+        timing_summary = None
+        if hasattr(final, "get_timing_summary"):
+            timing_summary = final.get_timing_summary()
+        elif isinstance(final, dict):
+            # Reconstruct minimal object for summary if possible
+            fs = AgentState(**final)
+            timing_summary = fs.get_timing_summary()
+        if timing_summary:
+            console.rule("[bold blue]Timing")
+            try:
+                console.print_json(json.dumps(timing_summary))
+            except Exception:
+                console.print(timing_summary)
+    except Exception:
+        pass
+
+    # Print BigQuery metrics if available
+    try:
+        metrics = get_last_query_metrics()
+        if metrics:
+            console.rule("[bold magenta]BigQuery Metrics")
+            try:
+                console.print_json(json.dumps(metrics.model_dump()))
+            except Exception:
+                console.print(metrics)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -91,9 +91,9 @@ class TestLangGraphFlow:
             mock_llm.side_effect = [
                 '{"task": "test", "tables": ["orders"]}',  # Valid plan
                 "INVALID SQL SYNTAX",  # Invalid SQL (first attempt)
-                "STILL INVALID SQL",   # Invalid SQL (retry 1) 
-                "ALSO INVALID SQL",    # Invalid SQL (retry 2)
-                "FINAL INVALID SQL",   # Extra to prevent StopIteration
+                "STILL INVALID SQL",  # Invalid SQL (retry 1)
+                "ALSO INVALID SQL",  # Invalid SQL (retry 2)
+                "FINAL INVALID SQL",  # Extra to prevent StopIteration
             ]
 
             app = build_graph()
@@ -385,42 +385,43 @@ class TestLangGraphFlow:
                     "INVALID SQL 2",  # SQL attempt 2
                     "INVALID SQL 3",  # SQL attempt 3
                 ]
-                
+
                 # Mock validate to always return error
                 def always_error(state):
                     state.error = "Validation failed"
                     return state
-                    
+
                 mock_validate.side_effect = always_error
-                
+
                 error_state = AgentState(question="Error test")
                 final_state = app.invoke(error_state)
 
                 # Should terminate with error after retries exhausted
                 assert final_state.error is not None
 
-    def test_graph_retry_exhaustion_preserves_error(self, mock_bigquery_client, mock_gemini_client):
+    def test_graph_retry_exhaustion_preserves_error(
+        self, mock_bigquery_client, mock_gemini_client
+    ):
         """Test that error state is preserved when all retries are exhausted."""
         app = build_graph()
-        
+
         with patch("src.agent.nodes.llm_completion") as mock_llm:
             # Return invalid SQL that will fail validation
             mock_llm.side_effect = [
                 '{"task": "test", "tables": ["orders"]}',  # Valid plan
                 "INVALID SQL SYNTAX",  # Invalid SQL (first attempt)
-                "STILL INVALID SQL",   # Invalid SQL (retry 1)
-                "ALSO INVALID SQL",    # Invalid SQL (retry 2)
-                "FINAL INVALID SQL",   # Extra in case needed
-                "MORE INVALID SQL",    # Extra in case needed
+                "STILL INVALID SQL",  # Invalid SQL (retry 1)
+                "ALSO INVALID SQL",  # Invalid SQL (retry 2)
+                "FINAL INVALID SQL",  # Extra in case needed
+                "MORE INVALID SQL",  # Extra in case needed
             ]
-            
+
             initial_state = AgentState(
-                question="Test retry exhaustion",
-                max_retries=2  # Allow 2 retries
+                question="Test retry exhaustion", max_retries=2  # Allow 2 retries
             )
-            
+
             final_state = app.invoke(initial_state)
-            
+
             # Should have exhausted all retries
             assert final_state.retry_count == 2
             # Error should be preserved in final state

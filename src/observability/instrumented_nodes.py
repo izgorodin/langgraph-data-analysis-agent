@@ -12,14 +12,12 @@ import time
 from functools import wraps
 from typing import Any, Dict, Optional
 
-from ..agent.nodes import (
-    analyze_df_node as analyze_df,
-    execute_sql_node as execute_sql,
-    plan_node as plan,
-    report_node as report,
-    synthesize_sql_node as synthesize_sql,
-    validate_sql_node as validate_sql,
-)
+from ..agent.nodes import analyze_df_node as analyze_df
+from ..agent.nodes import execute_sql_node as execute_sql
+from ..agent.nodes import plan_node as plan
+from ..agent.nodes import report_node as report
+from ..agent.nodes import synthesize_sql_node as synthesize_sql
+from ..agent.nodes import validate_sql_node as validate_sql
 from ..agent.state import AgentState
 from .business_metrics import QueryComplexity, get_business_metrics
 from .health import get_health_monitor
@@ -346,7 +344,7 @@ def instrumented_report(state: AgentState) -> AgentState:
                 "overhead_percentage": timing_summary.get("overhead_percentage", 0),
             },
         )
-        
+
         # Log summary for immediate visibility
         logger.info(f"Pipeline timing summary: {timing_summary}")
 

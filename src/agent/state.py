@@ -43,24 +43,27 @@ class AgentState(BaseModel):
         """Generate a comprehensive timing summary."""
         total_duration = self.get_total_pipeline_duration()
         node_total = sum(self.pipeline_timing.values())
-        
+
         summary = {
             "pipeline_timing": self.pipeline_timing.copy(),
             "total_duration": total_duration,
             "node_duration_total": node_total,
-            "overhead_duration": total_duration - node_total if total_duration else None,
-            "node_count": len(self.pipeline_timing)
+            "overhead_duration": (
+                total_duration - node_total if total_duration else None
+            ),
+            "node_count": len(self.pipeline_timing),
         }
-        
+
         # Add percentage breakdown if we have total duration
         if total_duration and total_duration > 0:
             summary["node_percentages"] = {
-                node: (duration / total_duration) * 100 
+                node: (duration / total_duration) * 100
                 for node, duration in self.pipeline_timing.items()
             }
             summary["overhead_percentage"] = (
-                (summary["overhead_duration"] / total_duration) * 100 
-                if summary["overhead_duration"] else 0
+                (summary["overhead_duration"] / total_duration) * 100
+                if summary["overhead_duration"]
+                else 0
             )
-        
+
         return summary

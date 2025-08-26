@@ -9,6 +9,7 @@ rich>=13.7
 click>=8.1
 python-dotenv>=1.0
 google-cloud-bigquery>=3.25
+google-cloud-bigquery-storage>=2.32
 google-auth>=2.30
 google-generativeai>=0.6
 db-dtypes==1.2.0
