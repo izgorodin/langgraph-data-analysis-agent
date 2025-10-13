@@ -43,7 +43,7 @@ jobs:
           fi
       - name: Initialize CodeQL
         if: steps.detect.outputs.no_project == 'false'
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: swift
       - name: Autobuild / Build placeholder
@@ -52,7 +52,7 @@ jobs:
           echo 'TODO: add xcodebuild command when project exists'
       - name: Perform CodeQL Analysis
         if: steps.detect.outputs.no_project == 'false'
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
       - name: Skip summary
         if: steps.detect.outputs.no_project == 'true'
         run: |
